@@ -1,0 +1,16 @@
+global:
+  registry: registry.cn-hangzhou.aliyuncs.com/bosun
+  imageTag: "0000000"
+  imagePullPolicy: IfNotPresent
+
+database:
+  existingSecret: bosun-database
+  storageClass: local-path
+  storageSize: 10Gi
+
+images:
+  api: backend-api
+  gateway: gateway
+  operator: operator
+  frontend: frontend
+  postgres: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297

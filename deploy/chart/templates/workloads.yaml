@@ -1,0 +1,155 @@
+{{- $root := . -}}
+{{- range $component := list "api" "gateway" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bosun-{{ $component }}
+  labels:
+    {{- include "bosun.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: bosun-{{ $component }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bosun-{{ $component }}
+  template:
+    metadata:
+      labels:
+        {{- include "bosun.labels" $root | nindent 8 }}
+        app.kubernetes.io/name: bosun-{{ $component }}
+    spec:
+      serviceAccountName: bosun-{{ if eq $component "api" }}backend-api{{ else }}gateway{{ end }}
+      automountServiceAccountToken: false
+      nodeSelector:
+        role: core
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "bosun.image" (dict "root" $root "name" (index $root.Values.images $component)) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ if eq $component "api" }}8080{{ else }}8081{{ end }}
+          env:
+            - name: BOSUN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.database.existingSecret }}
+                  key: url
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bosun-{{ $component }}
+  labels:
+    {{- include "bosun.labels" $root | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: bosun-{{ $component }}
+  ports:
+    - name: http
+      port: {{ if eq $component "api" }}8080{{ else }}8081{{ end }}
+      targetPort: http
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bosun-operator
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+    app.kubernetes.io/name: bosun-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: bosun-operator}
+  template:
+    metadata:
+      labels:
+        {{- include "bosun.labels" . | nindent 8 }}
+        app.kubernetes.io/name: bosun-operator
+    spec:
+      serviceAccountName: bosun-operator
+      nodeSelector: {role: core}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: operator
+          image: {{ include "bosun.image" (dict "root" . "name" .Values.images.operator) }}
+          args: ["--health-probe-bind-address=:8081"]
+          ports:
+            - {name: health, containerPort: 8081}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bosun-frontend
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+    app.kubernetes.io/name: bosun-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: bosun-frontend}
+  template:
+    metadata:
+      labels:
+        {{- include "bosun.labels" . | nindent 8 }}
+        app.kubernetes.io/name: bosun-frontend
+    spec:
+      nodeSelector: {role: edge}
+      tolerations:
+        - {key: node-role.kubernetes.io/edge, operator: Exists, effect: NoSchedule}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: frontend
+          image: {{ include "bosun.image" (dict "root" . "name" .Values.images.frontend) }}
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: cache, mountPath: /var/cache/nginx}
+            - {name: run, mountPath: /var/run}
+            - {name: tmp, mountPath: /tmp}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+      volumes:
+        - {name: cache, emptyDir: {sizeLimit: 16Mi}}
+        - {name: run, emptyDir: {sizeLimit: 1Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}

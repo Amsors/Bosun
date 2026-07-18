@@ -1,0 +1,122 @@
+name: Publish images
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Full commit SHA to publish; defaults to the selected branch HEAD
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ${{ vars.ACR_REGISTRY }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.ref.outputs.commit_sha }}
+      image_tag: ${{ steps.ref.outputs.image_tag }}
+    steps:
+      - id: ref
+        name: Resolve immutable image tag
+        env:
+          DISPATCH_SHA: ${{ inputs.git_sha }}
+          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          commit_sha="${DISPATCH_SHA:-${EVENT_SHA:-${DEFAULT_SHA}}}"
+          if [[ ! "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "git_sha must be a full 40-character lowercase commit SHA" >&2
+            exit 1
+          fi
+          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${commit_sha::7}" >> "${GITHUB_OUTPUT}"
+
+  images:
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: registry
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend-api
+            context: backend
+            build_args: COMPONENT=api
+          - image: gateway
+            context: backend
+            build_args: COMPONENT=gateway
+          - image: operator
+            context: operator
+            build_args: ""
+          - image: frontend
+            context: frontend
+            build_args: ""
+          - image: agent
+            context: images/agent
+            build_args: ""
+    steps:
+      - name: Validate registry configuration
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "${REGISTRY}" ]] || {
+            echo "ACR_REGISTRY variable is not configured" >&2
+            exit 1
+          }
+          [[ -n "${ACR_USERNAME}" ]] || {
+            echo "ACR_USERNAME secret is not configured" >&2
+            exit 1
+          }
+          [[ -n "${ACR_PASSWORD}" ]] || {
+            echo "ACR_PASSWORD secret is not configured" >&2
+            exit 1
+          }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ env.REGISTRY }}/bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
+          build-args: ${{ matrix.build_args }}
+
+  metadata:
+    needs: [prepare, images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write deployment metadata
+        env:
+          COMMIT_SHA: ${{ needs.prepare.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          install -d deployment-metadata
+          printf '%s\n' "${COMMIT_SHA}" > deployment-metadata/commit_sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployment-metadata
+          path: deployment-metadata/commit_sha
+          retention-days: 7
+          if-no-files-found: error

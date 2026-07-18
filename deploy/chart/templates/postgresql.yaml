@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bosun-postgresql
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+    app.kubernetes.io/name: bosun-postgresql
+spec:
+  serviceName: bosun-postgresql
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: bosun-postgresql}
+  template:
+    metadata:
+      labels:
+        {{- include "bosun.labels" . | nindent 8 }}
+        app.kubernetes.io/name: bosun-postgresql
+    spec:
+      nodeSelector: {role: core}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgresql
+          image: {{ .Values.images.postgres }}
+          env:
+            - {name: POSTGRES_USER, value: bosun}
+            - {name: POSTGRES_DB, value: bosun}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.database.existingSecret }}, key: password}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "bosun"]}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "bosun"]}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.database.storageClass }}
+        resources:
+          requests: {storage: {{ .Values.database.storageSize }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bosun-postgresql
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/name: bosun-postgresql}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}

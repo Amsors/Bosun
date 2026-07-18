@@ -1,0 +1,31 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: bosun-free
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+value: 1000
+globalDefault: false
+preemptionPolicy: Never
+description: Bosun free agent sessions without preemption.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: bosun-paid
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+value: 2000
+globalDefault: false
+preemptionPolicy: Never
+description: Reserved Bosun paid tier without preemption until F9.
+{{- range $name := list "backend-api" "gateway" "operator" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bosun-{{ $name }}
+  labels:
+    {{- include "bosun.labels" $ | nindent 4 }}
+automountServiceAccountToken: {{ eq $name "operator" }}
+{{- end }}

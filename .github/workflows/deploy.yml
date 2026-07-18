@@ -1,0 +1,110 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: ["Publish images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Full commit SHA whose images are already present in ACR
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ vars.ACR_REGISTRY }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.ref.outputs.commit_sha }}
+      image_tag: ${{ steps.ref.outputs.image_tag }}
+    steps:
+      - name: Download published image metadata
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-metadata
+          path: deployment-metadata
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - id: ref
+        name: Resolve published image tag
+        env:
+          DISPATCH_SHA: ${{ inputs.git_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${DISPATCH_SHA}" ]]; then
+            commit_sha="${DISPATCH_SHA}"
+          elif [[ -f deployment-metadata/commit_sha ]]; then
+            commit_sha="$(< deployment-metadata/commit_sha)"
+          else
+            echo "published image metadata is unavailable" >&2
+            exit 1
+          fi
+          if [[ ! "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "git_sha must be a full 40-character lowercase commit SHA" >&2
+            exit 1
+          fi
+          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${commit_sha::7}" >> "${GITHUB_OUTPUT}"
+
+  deploy:
+    needs: prepare
+    runs-on: [self-hosted, linux, bosun-deploy]
+    environment: production
+    steps:
+      - name: Validate deployment configuration
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          set -euo pipefail
+          [[ -n "${REGISTRY}" ]] || {
+            echo "ACR_REGISTRY variable is not configured" >&2
+            exit 1
+          }
+          [[ -n "${KUBECONFIG_B64}" ]] || {
+            echo "KUBECONFIG_B64 secret is not configured" >&2
+            exit 1
+          }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+          submodules: recursive
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - name: Deploy immutable git SHA
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          kubeconfig="${RUNNER_TEMP}/bosun-kubeconfig"
+          cleanup() {
+            rm -f "${kubeconfig}"
+          }
+          trap cleanup EXIT
+          umask 077
+          printf '%s' "${KUBECONFIG_B64}" | base64 --decode > "${kubeconfig}"
+          export KUBECONFIG="${kubeconfig}"
+          helm upgrade --install bosun deploy/chart \
+            --namespace bosun-platform \
+            --create-namespace \
+            --set-string global.registry="${REGISTRY}/bosun" \
+            --set-string global.imageTag="${IMAGE_TAG}" \
+            --atomic \
+            --wait

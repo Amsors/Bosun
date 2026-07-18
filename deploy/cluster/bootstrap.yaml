@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bosun-platform
+  labels:
+    app.kubernetes.io/managed-by: bosun
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: bosun-free
+  labels:
+    app.kubernetes.io/managed-by: bosun
+value: 1000
+globalDefault: false
+preemptionPolicy: Never
+description: Bosun free agent sessions without preemption.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: bosun-paid
+  labels:
+    app.kubernetes.io/managed-by: bosun
+value: 2000
+globalDefault: false
+preemptionPolicy: Never
+description: Reserved Bosun paid tier without preemption until F9.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bosun-backend-api
+  namespace: bosun-platform
+  labels:
+    app.kubernetes.io/managed-by: bosun
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bosun-gateway
+  namespace: bosun-platform
+  labels:
+    app.kubernetes.io/managed-by: bosun
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bosun-operator
+  namespace: bosun-platform
+  labels:
+    app.kubernetes.io/managed-by: bosun
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-backend-control-plane
+  labels:
+    app.kubernetes.io/managed-by: bosun
+rules:
+  - apiGroups: ["bosun.io"]
+    resources: ["userenvironments", "agentsessions"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bosun-backend-control-plane
+  labels:
+    app.kubernetes.io/managed-by: bosun
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bosun-backend-control-plane
+subjects:
+  - kind: ServiceAccount
+    name: bosun-backend-api
+    namespace: bosun-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-gateway-token-review
+  labels:
+    app.kubernetes.io/managed-by: bosun
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bosun-gateway-token-review
+  labels:
+    app.kubernetes.io/managed-by: bosun
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bosun-gateway-token-review
+subjects:
+  - kind: ServiceAccount
+    name: bosun-gateway
+    namespace: bosun-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-operator
+  labels:
+    app.kubernetes.io/managed-by: bosun
+rules:
+  - apiGroups: ["bosun.io"]
+    resources: ["userenvironments", "agentsessions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["bosun.io"]
+    resources: ["userenvironments/status", "agentsessions/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["bosun.io"]
+    resources: ["userenvironments/finalizers", "agentsessions/finalizers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["namespaces", "resourcequotas", "limitranges", "serviceaccounts", "pods", "persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bosun-operator
+  labels:
+    app.kubernetes.io/managed-by: bosun
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bosun-operator
+subjects:
+  - kind: ServiceAccount
+    name: bosun-operator
+    namespace: bosun-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-user-backend-terminal
+  labels:
+    app.kubernetes.io/managed-by: bosun
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-user-gateway
+  labels:
+    app.kubernetes.io/managed-by: bosun
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]

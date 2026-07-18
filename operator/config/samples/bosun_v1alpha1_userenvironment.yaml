@@ -1,0 +1,9 @@
+apiVersion: bosun.io/v1alpha1
+kind: UserEnvironment
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/managed-by: kustomize
+  name: userenvironment-sample
+spec:
+  # TODO(user): Add fields here
