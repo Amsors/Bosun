@@ -27,5 +27,5 @@ metadata:
   name: bosun-{{ $name }}
   labels:
     {{- include "bosun.labels" $ | nindent 4 }}
-automountServiceAccountToken: {{ or (eq $name "operator") (eq $name "backend-api") }}
+automountServiceAccountToken: {{ or (eq $name "operator") (eq $name "backend-api") (eq $name "gateway") }}
 {{- end }}

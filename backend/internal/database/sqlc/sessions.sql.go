@@ -116,6 +116,40 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 	return i, err
 }
 
+const getGatewaySessionIdentity = `-- name: GetGatewaySessionIdentity :one
+SELECT id, cr_namespace, cr_name, phase, provider_mode
+FROM bosun.sessions
+WHERE cr_namespace = $1
+  AND cr_name = $2
+  AND deleted_at IS NULL
+`
+
+type GetGatewaySessionIdentityParams struct {
+	CrNamespace string `json:"cr_namespace"`
+	CrName      string `json:"cr_name"`
+}
+
+type GetGatewaySessionIdentityRow struct {
+	ID           uuid.UUID `json:"id"`
+	CrNamespace  string    `json:"cr_namespace"`
+	CrName       string    `json:"cr_name"`
+	Phase        string    `json:"phase"`
+	ProviderMode string    `json:"provider_mode"`
+}
+
+func (q *Queries) GetGatewaySessionIdentity(ctx context.Context, arg GetGatewaySessionIdentityParams) (GetGatewaySessionIdentityRow, error) {
+	row := q.db.QueryRow(ctx, getGatewaySessionIdentity, arg.CrNamespace, arg.CrName)
+	var i GetGatewaySessionIdentityRow
+	err := row.Scan(
+		&i.ID,
+		&i.CrNamespace,
+		&i.CrName,
+		&i.Phase,
+		&i.ProviderMode,
+	)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version
 FROM bosun.sessions

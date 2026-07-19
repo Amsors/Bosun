@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,8 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if got := tokenVolumeMounts(pod.Spec.Containers[1]); got != 1 {
 		t.Fatalf("proxy token volume mounts = %d, want 1", got)
 	}
+	assertGatewayTokenProjection(t, &pod)
+	assertLLMEgressConfiguration(t, &pod)
 	if len(pod.Spec.Tolerations) != 2 ||
 		pod.Spec.Tolerations[0].TolerationSeconds == nil ||
 		*pod.Spec.Tolerations[0].TolerationSeconds != 300 {
@@ -384,4 +387,48 @@ func tokenVolumeMounts(container corev1.Container) int {
 		}
 	}
 	return count
+}
+
+func assertGatewayTokenProjection(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name != gatewayTokenVolume {
+			continue
+		}
+		if volume.Projected == nil || len(volume.Projected.Sources) != 1 ||
+			volume.Projected.Sources[0].ServiceAccountToken == nil {
+			t.Fatalf("gateway token volume = %#v", volume)
+		}
+		projection := volume.Projected.Sources[0].ServiceAccountToken
+		if projection.Audience != "bosun-llm-gateway" ||
+			projection.ExpirationSeconds == nil ||
+			*projection.ExpirationSeconds != 3600 ||
+			projection.Path != "token" {
+			t.Fatalf("gateway token projection = %#v", projection)
+		}
+		return
+	}
+	t.Fatal("gateway token projected volume is missing")
+}
+
+func assertLLMEgressConfiguration(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	agentEnv := make(map[string]string)
+	for _, variable := range pod.Spec.Containers[0].Env {
+		agentEnv[variable.Name] = variable.Value
+	}
+	if agentEnv["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:8080" ||
+		agentEnv["ANTHROPIC_API_KEY"] != "sk-xxxx" ||
+		agentEnv["HTTPS_PROXY"] == "" ||
+		!strings.Contains(agentEnv["NO_PROXY"], "127.0.0.1") {
+		t.Fatalf("agent LLM egress env = %#v", agentEnv)
+	}
+	proxy := pod.Spec.Containers[1]
+	if len(proxy.Args) != 3 ||
+		proxy.Args[0] != "--listen=127.0.0.1:8080" ||
+		proxy.ReadinessProbe == nil ||
+		proxy.ReadinessProbe.Exec == nil ||
+		len(proxy.ReadinessProbe.Exec.Command) != 2 {
+		t.Fatalf("auth proxy configuration = %#v", proxy)
+	}
 }

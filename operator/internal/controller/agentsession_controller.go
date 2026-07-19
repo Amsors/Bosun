@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -495,7 +494,9 @@ func (r *AgentSessionReconciler) desiredPod(
 					Image: r.AgentImage,
 					Env: []corev1.EnvVar{
 						{Name: "ANTHROPIC_BASE_URL", Value: "http://127.0.0.1:8080"},
+						{Name: "ANTHROPIC_API_KEY", Value: "sk-xxxx"},
 						{Name: "HTTPS_PROXY", Value: r.EgressProxyURL},
+						{Name: "NO_PROXY", Value: "127.0.0.1,localhost"},
 					},
 					Resources:       corev1.ResourceRequirements{Requests: agentRequests, Limits: agentLimits},
 					SecurityContext: restrictedContainerSecurityContext(&noPrivilege, &readOnly),
@@ -511,7 +512,7 @@ func (r *AgentSessionReconciler) desiredPod(
 					Name:    "auth-proxy",
 					Image:   r.AgentImage,
 					Command: []string{"/usr/local/bin/bosun-auth-proxy"},
-					Args:    []string{"--listen=:8080", "--upstream=" + r.GatewayURL, "--token-file=/var/run/secrets/bosun/token"},
+					Args:    []string{"--listen=127.0.0.1:8080", "--upstream=" + r.GatewayURL, "--token-file=/var/run/secrets/bosun/token"},
 					Ports:   []corev1.ContainerPort{{Name: "proxy", ContainerPort: 8080, Protocol: tcp}},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
@@ -526,8 +527,14 @@ func (r *AgentSessionReconciler) desiredPod(
 						{Name: gatewayTokenVolume, MountPath: "/var/run/secrets/bosun", ReadOnly: true},
 						{Name: "proxy-tmp", MountPath: "/tmp"},
 					},
-					ReadinessProbe: tcpProbe(8080),
-					LivenessProbe:  tcpProbe(8080),
+					ReadinessProbe: execProbe(
+						"/usr/local/bin/bosun-auth-proxy",
+						"--healthcheck=http://127.0.0.1:8080/healthz",
+					),
+					LivenessProbe: execProbe(
+						"/usr/local/bin/bosun-auth-proxy",
+						"--healthcheck=http://127.0.0.1:8080/healthz",
+					),
 				},
 			},
 			Volumes: []corev1.Volume{
@@ -605,13 +612,6 @@ func restrictedContainerSecurityContext(noPrivilege, readOnly *bool) *corev1.Sec
 func execProbe(command ...string) *corev1.Probe {
 	return &corev1.Probe{
 		ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: command}},
-		InitialDelaySeconds: 2, PeriodSeconds: 5, TimeoutSeconds: 2, FailureThreshold: 3,
-	}
-}
-
-func tcpProbe(port int) *corev1.Probe {
-	return &corev1.Probe{
-		ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(port))}},
 		InitialDelaySeconds: 2, PeriodSeconds: 5, TimeoutSeconds: 2, FailureThreshold: 3,
 	}
 }

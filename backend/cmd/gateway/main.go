@@ -9,10 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Amsors/Bosun/backend/internal/app"
 	"github.com/Amsors/Bosun/backend/internal/config"
 	"github.com/Amsors/Bosun/backend/internal/database"
+	db "github.com/Amsors/Bosun/backend/internal/database/sqlc"
+	"github.com/Amsors/Bosun/backend/internal/gateway"
 	"github.com/Amsors/Bosun/backend/internal/logging"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 func main() {
@@ -37,9 +40,41 @@ func run() int {
 	}
 	defer pool.Close()
 
+	k8sConfig, err := rest.InClusterConfig()
+	if err != nil {
+		logger.Error("kubernetes configuration failed", "reason", "in_cluster_config_unavailable")
+		return 1
+	}
+	k8sConfig.Timeout = cfg.Gateway.TokenReviewTimeout
+	clientset, err := kubernetes.NewForConfig(k8sConfig)
+	if err != nil {
+		logger.Error("kubernetes client creation failed", "reason", "kubernetes_client_unavailable")
+		return 1
+	}
+
+	resolver := gateway.NewDatabaseSessionResolver(db.New(pool), cfg.Gateway.SessionLookupTimeout)
+	authenticator := gateway.NewAuthenticator(
+		clientset.AuthenticationV1().TokenReviews(),
+		resolver,
+		cfg.Gateway.TokenReviewTimeout,
+	)
+	metrics := gateway.NewMetrics()
+	handler, err := gateway.NewHandler(gateway.HandlerConfig{
+		UpstreamURL:        cfg.Gateway.UpstreamURL,
+		UpstreamAPIKey:     cfg.Gateway.UpstreamAPIKey,
+		Provider:           cfg.Gateway.Provider,
+		UpstreamAuthHeader: cfg.Gateway.UpstreamAuthHeader,
+		UpstreamAuthScheme: cfg.Gateway.UpstreamAuthScheme,
+		UpstreamTimeout:    cfg.Gateway.UpstreamTimeout,
+	}, authenticator, pool, metrics, logger)
+	if err != nil {
+		logger.Error("gateway handler creation failed", "reason", "invalid_gateway_configuration")
+		return 1
+	}
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           app.NewRouter(string(config.ComponentGateway), pool),
+		Handler:           handler,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}
 	errs := make(chan error, 1)

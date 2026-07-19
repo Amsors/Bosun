@@ -30,6 +30,13 @@ SELECT *
 FROM bosun.sessions
 WHERE id = $1;
 
+-- name: GetGatewaySessionIdentity :one
+SELECT id, cr_namespace, cr_name, phase, provider_mode
+FROM bosun.sessions
+WHERE cr_namespace = $1
+  AND cr_name = $2
+  AND deleted_at IS NULL;
+
 -- name: ListSessionsForUser :many
 SELECT *
 FROM bosun.sessions

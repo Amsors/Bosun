@@ -70,6 +70,32 @@ subjects:
     name: bosun-backend-api
     namespace: {{ .Release.Namespace }}
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-gateway
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bosun-gateway
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bosun-gateway
+subjects:
+  - kind: ServiceAccount
+    name: bosun-gateway
+    namespace: {{ .Release.Namespace }}
+---
 # UserEnvironment controller 在每个用户 namespace 创建 RoleBinding 绑定本角色。
 # Secret 权限严格只写，credential 明文只允许 gateway 读取（techspec §9.2）。
 apiVersion: rbac.authorization.k8s.io/v1

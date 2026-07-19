@@ -30,11 +30,22 @@ type defaultFieldsHandler struct {
 }
 
 func (h defaultFieldsHandler) Handle(ctx context.Context, record slog.Record) error {
-	record.AddAttrs(
+	present := make(map[string]bool, 4)
+	record.Attrs(func(attr slog.Attr) bool {
+		present[attr.Key] = true
+		return true
+	})
+	defaults := []slog.Attr{
 		slog.String("component", h.component),
 		slog.String("request_id", ""),
 		slog.String("session_id", ""),
-	)
+		slog.String("reason", ""),
+	}
+	for _, attr := range defaults {
+		if !present[attr.Key] {
+			record.AddAttrs(attr)
+		}
+	}
 	return h.Handler.Handle(ctx, record)
 }
 

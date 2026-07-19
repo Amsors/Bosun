@@ -15,8 +15,11 @@ if rg --hidden --glob='!**/.git/**' --glob='!**/node_modules/**' \
   exit 1
 fi
 
-helm lint "${root}/deploy/chart"
-helm template bosun "${root}/deploy/chart" --namespace bosun-platform --include-crds >/dev/null
+helm lint "${root}/deploy/chart" --kube-version 1.36.0
+helm template bosun "${root}/deploy/chart" \
+  --namespace bosun-platform \
+  --kube-version 1.36.0 \
+  --include-crds >/dev/null
 
 generated="$(mktemp -d)"
 trap 'rm -rf "${generated}"' EXIT

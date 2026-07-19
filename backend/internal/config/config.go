@@ -3,7 +3,11 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -12,6 +16,11 @@ type Component string
 const (
 	ComponentAPI     Component = "api"
 	ComponentGateway Component = "gateway"
+)
+
+var (
+	providerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	authSchemePattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._~-]*$`)
 )
 
 type Config struct {
@@ -23,6 +32,18 @@ type Config struct {
 	DatabaseMigrateTimeout time.Duration
 	ReadHeaderTimeout      time.Duration
 	ShutdownTimeout        time.Duration
+	Gateway                GatewayConfig
+}
+
+type GatewayConfig struct {
+	UpstreamURL          string
+	UpstreamAPIKey       string
+	Provider             string
+	UpstreamAuthHeader   string
+	UpstreamAuthScheme   string
+	TokenReviewTimeout   time.Duration
+	SessionLookupTimeout time.Duration
+	UpstreamTimeout      time.Duration
 }
 
 func Load(component Component) (Config, error) {
@@ -67,6 +88,66 @@ func Load(component Component) (Config, error) {
 	}
 	if cfg.ShutdownTimeout, err = duration(prefix+"SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout); err != nil {
 		return Config{}, err
+	}
+	if component == ComponentGateway {
+		if cfg.Gateway, err = loadGatewayConfig(); err != nil {
+			return Config{}, err
+		}
+	}
+	return cfg, nil
+}
+
+func loadGatewayConfig() (GatewayConfig, error) {
+	cfg := GatewayConfig{
+		UpstreamURL:          os.Getenv("BOSUN_GATEWAY_UPSTREAM_URL"),
+		UpstreamAPIKey:       os.Getenv("BOSUN_GATEWAY_UPSTREAM_API_KEY"),
+		Provider:             valueOrDefault("BOSUN_GATEWAY_PROVIDER", "platform-default"),
+		UpstreamAuthHeader:   http.CanonicalHeaderKey(valueOrDefault("BOSUN_GATEWAY_UPSTREAM_AUTH_HEADER", "x-api-key")),
+		UpstreamAuthScheme:   os.Getenv("BOSUN_GATEWAY_UPSTREAM_AUTH_SCHEME"),
+		TokenReviewTimeout:   3 * time.Second,
+		SessionLookupTimeout: 3 * time.Second,
+		UpstreamTimeout:      10 * time.Minute,
+	}
+	if cfg.UpstreamURL == "" {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_URL is required")
+	}
+	endpoint, err := url.Parse(cfg.UpstreamURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" ||
+		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_URL must be an HTTPS base URL without credentials, query, or fragment")
+	}
+	if cfg.UpstreamAPIKey == "" {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_API_KEY is required")
+	}
+	if strings.ContainsAny(cfg.UpstreamAPIKey, "\r\n") {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_API_KEY contains invalid characters")
+	}
+	if !providerNamePattern.MatchString(cfg.Provider) {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_PROVIDER must be a lowercase DNS label")
+	}
+	switch cfg.UpstreamAuthHeader {
+	case "Authorization":
+		if cfg.UpstreamAuthScheme == "" {
+			cfg.UpstreamAuthScheme = "Bearer"
+		}
+	case "X-Api-Key":
+		if cfg.UpstreamAuthScheme != "" {
+			return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_AUTH_SCHEME must be empty for X-Api-Key")
+		}
+	default:
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_AUTH_HEADER must be Authorization or X-Api-Key")
+	}
+	if cfg.UpstreamAuthScheme != "" && !authSchemePattern.MatchString(cfg.UpstreamAuthScheme) {
+		return GatewayConfig{}, fmt.Errorf("BOSUN_GATEWAY_UPSTREAM_AUTH_SCHEME is invalid")
+	}
+	if cfg.TokenReviewTimeout, err = duration("BOSUN_GATEWAY_TOKEN_REVIEW_TIMEOUT", cfg.TokenReviewTimeout); err != nil {
+		return GatewayConfig{}, err
+	}
+	if cfg.SessionLookupTimeout, err = duration("BOSUN_GATEWAY_SESSION_LOOKUP_TIMEOUT", cfg.SessionLookupTimeout); err != nil {
+		return GatewayConfig{}, err
+	}
+	if cfg.UpstreamTimeout, err = duration("BOSUN_GATEWAY_UPSTREAM_TIMEOUT", cfg.UpstreamTimeout); err != nil {
+		return GatewayConfig{}, err
 	}
 	return cfg, nil
 }

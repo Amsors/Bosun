@@ -20,8 +20,8 @@ spec:
         app.kubernetes.io/name: bosun-{{ $component }}
     spec:
       serviceAccountName: bosun-{{ if eq $component "api" }}backend-api{{ else }}gateway{{ end }}
-      # backend API 需要访问 k8s API 创建/读取 UserEnvironment/AgentSession CR（techspec §9.2）。
-      automountServiceAccountToken: {{ eq $component "api" }}
+      # API 与 gateway 分别使用最小 RBAC 访问 CR 和 TokenReview（techspec §9.2）。
+      automountServiceAccountToken: true
       nodeSelector:
         role: core
       securityContext:
@@ -48,6 +48,20 @@ spec:
                   key: private-key
             - name: BOSUN_API_TRUSTED_PROXY_HEADER
               value: {{ $root.Values.auth.trustedProxyHeader | quote }}
+            {{- else }}
+            - name: BOSUN_GATEWAY_UPSTREAM_URL
+              value: {{ $root.Values.gateway.upstreamURL | quote }}
+            - name: BOSUN_GATEWAY_PROVIDER
+              value: {{ $root.Values.gateway.provider | quote }}
+            - name: BOSUN_GATEWAY_UPSTREAM_AUTH_HEADER
+              value: {{ $root.Values.gateway.upstreamAuthHeader | quote }}
+            - name: BOSUN_GATEWAY_UPSTREAM_AUTH_SCHEME
+              value: {{ $root.Values.gateway.upstreamAuthScheme | quote }}
+            - name: BOSUN_GATEWAY_UPSTREAM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.gateway.existingSecret }}
+                  key: {{ $root.Values.gateway.secretKey }}
             {{- end }}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
