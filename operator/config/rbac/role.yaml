@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - limitranges
   - namespaces
   - resourcequotas
@@ -18,9 +25,11 @@ rules:
   - update
   - watch
 - apiGroups:
-  - bosun.io
+  - ""
   resources:
-  - agentsessions
+  - persistentvolumeclaims
+  - pods
+  - serviceaccounts
   verbs:
   - create
   - delete
@@ -28,6 +37,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - bosun.io
+  resources:
+  - agentsessions
+  - userenvironments
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - bosun.io
@@ -45,14 +63,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - bosun.io
-  resources:
-  - userenvironments
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -60,6 +61,11 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var platformNamespace string
+	var agentImage string
+	var workspaceStorageClass string
+	var gatewayURL string
+	var egressProxyURL string
+	var idleScanInterval time.Duration
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
@@ -72,6 +78,21 @@ func main() {
 		"bosun-platform",
 		"The namespace containing Bosun platform service accounts and egress targets.",
 	)
+	flag.StringVar(&agentImage, "agent-image", "", "Immutable image reference for the main agent container.")
+	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "local-path", "StorageClass for P0 workspaces.")
+	flag.StringVar(
+		&gatewayURL,
+		"gateway-url",
+		"http://bosun-gateway.bosun-platform.svc:8081",
+		"Cluster URL for bosun-gateway.",
+	)
+	flag.StringVar(
+		&egressProxyURL,
+		"egress-proxy-url",
+		"http://bosun-egress-proxy.bosun-platform.svc:3128",
+		"Cluster URL for the Git egress proxy.",
+	)
+	flag.DurationVar(&idleScanInterval, "idle-scan-interval", 30*time.Second, "Agent idle activity scan interval.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -194,8 +215,13 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.AgentSessionReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		AgentImage:       agentImage,
+		StorageClassName: workspaceStorageClass,
+		GatewayURL:       gatewayURL,
+		EgressProxyURL:   egressProxyURL,
+		IdleScanInterval: idleScanInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentsession")
 		os.Exit(1)

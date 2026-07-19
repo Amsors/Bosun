@@ -8,6 +8,10 @@ database:
   storageClass: local-path
   storageSize: 10Gi
 
+agent:
+  storageClass: local-path
+  idleScanInterval: 30s
+
 # JWT 私钥等敏感值由部署者在集群外注入 Secret（spec/05），不写入 values。
 # 期望 Secret 含 key: private-key（PKCS#8 Ed25519 PEM）。
 auth:
@@ -26,5 +30,6 @@ images:
   api: backend-api
   gateway: gateway
   operator: operator
+  agent: agent
   frontend: frontend
   postgres: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297

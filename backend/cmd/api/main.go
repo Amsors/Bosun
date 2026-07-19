@@ -21,6 +21,7 @@ import (
 	"github.com/Amsors/Bosun/backend/internal/database"
 	"github.com/Amsors/Bosun/backend/internal/logging"
 	"github.com/Amsors/Bosun/backend/internal/ratelimit"
+	"github.com/Amsors/Bosun/backend/internal/session"
 	"github.com/Amsors/Bosun/backend/internal/userenv"
 )
 
@@ -68,10 +69,10 @@ func run() int {
 		return 1
 	}
 
-	store := auth.NewPgxStore(pool)
+	authStore := auth.NewPgxStore(pool)
 	provisioner := userenv.NewCRProvisioner(k8sClient)
 	service, err := auth.NewService(auth.Config{
-		Store:           store,
+		Store:           authStore,
 		Issuer:          issuer,
 		Env:             provisioner,
 		Argon2:          authCfg.Argon2,
@@ -83,14 +84,29 @@ func run() int {
 		return 1
 	}
 
-	repairer := userenv.NewRepairer(store, provisioner, authCfg.RepairInterval, logger)
-	go repairer.Run(ctx)
+	userEnvRepairer := userenv.NewRepairer(authStore, provisioner, authCfg.RepairInterval, logger)
+	go userEnvRepairer.Run(ctx)
+
+	sessionStore := session.NewPgxStore(pool)
+	sessionRuntime := session.NewCRControl(k8sClient)
+	sessionService, err := session.NewService(session.ServiceConfig{
+		Store: sessionStore, Idempotency: authStore, Environment: provisioner,
+		Runtime: sessionRuntime, Logger: logger,
+	})
+	if err != nil {
+		logger.Error("session service init failed", "reason", err)
+		return 1
+	}
+	sessionRepairer := session.NewRepairer(sessionStore, sessionRuntime, authCfg.RepairInterval, logger)
+	go sessionRepairer.Run(ctx)
+	projector := session.NewProjector(sessionStore, k8sClient, logger)
+	go projector.Run(ctx)
 
 	handler := app.NewAPIRouter(app.APIDeps{
 		Database:     pool,
 		Auth:         service,
 		JWT:          issuer,
-		Store:        store,
+		Store:        authStore,
 		LoginByIP:    ratelimit.New(authCfg.LoginIPLimit, authCfg.LoginIPWindow, authCfg.LoginLimiterCap),
 		LoginByEmail: ratelimit.New(authCfg.LoginEmailLimit, authCfg.LoginEmailWindow, authCfg.LoginLimiterCap),
 		Cookie: app.CookieConfig{
@@ -100,6 +116,7 @@ func run() int {
 			TTL:    authCfg.RefreshTokenTTL,
 		},
 		TrustedProxyHeader: authCfg.TrustedProxyHeader,
+		Sessions:           sessionService,
 	})
 
 	server := &http.Server{
@@ -133,7 +150,7 @@ func run() int {
 }
 
 // newK8sClient 构造用于创建/读取 CR 的 typed client；使用 in-cluster 或本地 kubeconfig。
-func newK8sClient() (client.Client, error) {
+func newK8sClient() (client.WithWatch, error) {
 	restCfg, err := ctrlconfig.GetConfig()
 	if err != nil {
 		return nil, err
@@ -142,5 +159,5 @@ func newK8sClient() (client.Client, error) {
 	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	return client.New(restCfg, client.Options{Scheme: scheme})
+	return client.NewWithWatch(restCfg, client.Options{Scheme: scheme})
 }

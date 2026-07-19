@@ -33,6 +33,37 @@ type BosunRefreshToken struct {
 	ReplacedBy *uuid.UUID `json:"replaced_by"`
 }
 
+type BosunSession struct {
+	ID                   uuid.UUID  `json:"id"`
+	UserID               uuid.UUID  `json:"user_id"`
+	CrNamespace          string     `json:"cr_namespace"`
+	CrName               string     `json:"cr_name"`
+	Tier                 string     `json:"tier"`
+	Runtime              string     `json:"runtime"`
+	ProviderMode         string     `json:"provider_mode"`
+	ProviderCredentialID *uuid.UUID `json:"provider_credential_id"`
+	StoragePolicy        string     `json:"storage_policy"`
+	DesiredState         string     `json:"desired_state"`
+	ResumeNonce          uuid.UUID  `json:"resume_nonce"`
+	Phase                string     `json:"phase"`
+	PhaseReason          string     `json:"phase_reason"`
+	Conditions           []byte     `json:"conditions"`
+	LastActiveAt         *time.Time `json:"last_active_at"`
+	CrResourceVersion    int64      `json:"cr_resource_version"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	DeletedAt            *time.Time `json:"deleted_at"`
+	Version              int64      `json:"version"`
+}
+
+type BosunSessionEvent struct {
+	ID         uuid.UUID `json:"id"`
+	SessionID  uuid.UUID `json:"session_id"`
+	Type       string    `json:"type"`
+	Payload    []byte    `json:"payload"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
 type BosunUser struct {
 	ID           uuid.UUID  `json:"id"`
 	Email        string     `json:"email"`

@@ -11,6 +11,7 @@ import (
 	"github.com/Amsors/Bosun/backend/internal/auth"
 	"github.com/Amsors/Bosun/backend/internal/envelope"
 	"github.com/Amsors/Bosun/backend/internal/ratelimit"
+	"github.com/Amsors/Bosun/backend/internal/session"
 )
 
 type Pinger interface {
@@ -53,6 +54,7 @@ type APIDeps struct {
 	Cookie             CookieConfig
 	TrustedProxyHeader string
 	Now                func() time.Time
+	Sessions           sessionService
 }
 
 // NewAPIRouter 构造 backend API 的完整路由（认证 + 当前用户）。
@@ -80,5 +82,16 @@ func NewAPIRouter(deps APIDeps) http.Handler {
 	authGroup.POST("/refresh", h.refresh)
 	authGroup.POST("/logout", h.logout)
 	v1.GET("/me", h.requireAuth, h.me)
+	if deps.Sessions != nil {
+		sessions := &sessionHandler{svc: deps.Sessions}
+		group := v1.Group("/sessions", h.requireAuth)
+		group.POST("", sessions.create)
+		group.GET("", sessions.list)
+		group.GET("/:id", sessions.get)
+		group.DELETE("/:id", sessions.delete)
+		group.POST("/:id/hibernate", sessions.transition(session.ActionHibernate))
+		group.POST("/:id/resume", sessions.transition(session.ActionResume))
+		group.POST("/:id/retry", sessions.transition(session.ActionRetry))
+	}
 	return router
 }

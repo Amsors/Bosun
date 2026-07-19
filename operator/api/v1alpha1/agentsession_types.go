@@ -36,6 +36,18 @@ const (
 
 	StoragePolicyLocal   StoragePolicy = "local"
 	StoragePolicyArchive StoragePolicy = "archive"
+
+	AgentSessionPhasePending      AgentSessionPhase = "Pending"
+	AgentSessionPhaseProvisioning AgentSessionPhase = "Provisioning"
+	AgentSessionPhaseRunning      AgentSessionPhase = "Running"
+	AgentSessionPhaseIdle         AgentSessionPhase = "Idle"
+	AgentSessionPhaseHibernating  AgentSessionPhase = "Hibernating"
+	AgentSessionPhaseHibernated   AgentSessionPhase = "Hibernated"
+	AgentSessionPhaseArchiving    AgentSessionPhase = "Archiving"
+	AgentSessionPhaseArchived     AgentSessionPhase = "Archived"
+	AgentSessionPhaseRestoring    AgentSessionPhase = "Restoring"
+	AgentSessionPhaseDeleting     AgentSessionPhase = "Deleting"
+	AgentSessionPhaseFailed       AgentSessionPhase = "Failed"
 )
 
 type ProviderSpec struct {

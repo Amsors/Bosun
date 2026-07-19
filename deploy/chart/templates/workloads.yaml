@@ -104,6 +104,11 @@ spec:
           args:
             - "--health-probe-bind-address=:8081"
             - "--platform-namespace={{ .Release.Namespace }}"
+            - {{ printf "--agent-image=%s" (include "bosun.image" (dict "root" . "name" .Values.images.agent)) | quote }}
+            - "--workspace-storage-class={{ .Values.agent.storageClass }}"
+            - "--gateway-url=http://bosun-gateway.{{ .Release.Namespace }}.svc:8081"
+            - "--egress-proxy-url=http://bosun-egress-proxy.{{ .Release.Namespace }}.svc:3128"
+            - "--idle-scan-interval={{ .Values.agent.idleScanInterval }}"
           ports:
             - {name: health, containerPort: 8081}
           resources:
