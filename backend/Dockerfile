@@ -4,9 +4,14 @@ ARG RUNTIME_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f7
 FROM ${GO_IMAGE} AS builder
 ARG COMPONENT
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./backend/
+COPY operator/go.mod operator/go.sum ./operator/
+WORKDIR /src/backend
 RUN go mod download
-COPY . .
+WORKDIR /src
+COPY backend ./backend
+COPY operator ./operator
+WORKDIR /src/backend
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/bosun "./cmd/${COMPONENT}"
 
 FROM ${RUNTIME_IMAGE}

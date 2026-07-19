@@ -3,3 +3,40 @@
 //   sqlc v1.30.0
 
 package db
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type BosunIdempotencyKey struct {
+	UserID         uuid.UUID `json:"user_id"`
+	Key            string    `json:"key"`
+	Method         string    `json:"method"`
+	Path           string    `json:"path"`
+	RequestHash    []byte    `json:"request_hash"`
+	ResponseStatus int32     `json:"response_status"`
+	ResponseBody   []byte    `json:"response_body"`
+	CreatedAt      time.Time `json:"created_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+type BosunRefreshToken struct {
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	FamilyID   uuid.UUID  `json:"family_id"`
+	TokenHash  []byte     `json:"token_hash"`
+	IssuedAt   time.Time  `json:"issued_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+	ReplacedBy *uuid.UUID `json:"replaced_by"`
+}
+
+type BosunUser struct {
+	ID           uuid.UUID  `json:"id"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"password_hash"`
+	CreatedAt    time.Time  `json:"created_at"`
+	DisabledAt   *time.Time `json:"disabled_at"`
+}

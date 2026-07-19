@@ -20,7 +20,8 @@ spec:
         app.kubernetes.io/name: bosun-{{ $component }}
     spec:
       serviceAccountName: bosun-{{ if eq $component "api" }}backend-api{{ else }}gateway{{ end }}
-      automountServiceAccountToken: false
+      # backend API 需要访问 k8s API 创建/读取 UserEnvironment/AgentSession CR（techspec §9.2）。
+      automountServiceAccountToken: {{ eq $component "api" }}
       nodeSelector:
         role: core
       securityContext:
@@ -39,6 +40,15 @@ spec:
                 secretKeyRef:
                   name: {{ $root.Values.database.existingSecret }}
                   key: url
+            {{- if eq $component "api" }}
+            - name: BOSUN_API_JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.auth.jwtSecret }}
+                  key: private-key
+            - name: BOSUN_API_TRUSTED_PROXY_HEADER
+              value: {{ $root.Values.auth.trustedProxyHeader | quote }}
+            {{- end }}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -91,7 +101,9 @@ spec:
       containers:
         - name: operator
           image: {{ include "bosun.image" (dict "root" . "name" .Values.images.operator) }}
-          args: ["--health-probe-bind-address=:8081"]
+          args:
+            - "--health-probe-bind-address=:8081"
+            - "--platform-namespace={{ .Release.Namespace }}"
           ports:
             - {name: health, containerPort: 8081}
           resources:

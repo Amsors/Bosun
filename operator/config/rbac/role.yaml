@@ -5,10 +5,22 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - limitranges
+  - namespaces
+  - resourcequotas
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - bosun.io
   resources:
   - agentsessions
-  - userenvironments
   verbs:
   - create
   - delete
@@ -33,3 +45,33 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - bosun.io
+  resources:
+  - userenvironments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch

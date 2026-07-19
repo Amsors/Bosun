@@ -59,12 +59,19 @@ func main() {
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
+	var platformNamespace string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(
+		&platformNamespace,
+		"platform-namespace",
+		"bosun-platform",
+		"The namespace containing Bosun platform service accounts and egress targets.",
+	)
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -179,8 +186,9 @@ func main() {
 	}
 
 	if err := (&controller.UserEnvironmentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		PlatformNamespace: platformNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "userenvironment")
 		os.Exit(1)

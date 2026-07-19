@@ -20,6 +20,7 @@ type Config struct {
 	DatabaseURL            string
 	LogLevel               slog.Level
 	DatabaseConnectTimeout time.Duration
+	DatabaseMigrateTimeout time.Duration
 	ReadHeaderTimeout      time.Duration
 	ShutdownTimeout        time.Duration
 }
@@ -41,6 +42,7 @@ func Load(component Component) (Config, error) {
 		ListenAddress:          valueOrDefault(prefix+"LISTEN_ADDRESS", defaultAddress),
 		DatabaseURL:            os.Getenv("BOSUN_DATABASE_URL"),
 		DatabaseConnectTimeout: 5 * time.Second,
+		DatabaseMigrateTimeout: 30 * time.Second,
 		ReadHeaderTimeout:      5 * time.Second,
 		ShutdownTimeout:        10 * time.Second,
 	}
@@ -54,6 +56,11 @@ func Load(component Component) (Config, error) {
 	}
 	if cfg.DatabaseConnectTimeout, err = duration(prefix+"DATABASE_CONNECT_TIMEOUT", cfg.DatabaseConnectTimeout); err != nil {
 		return Config{}, err
+	}
+	if component == ComponentAPI {
+		if cfg.DatabaseMigrateTimeout, err = duration(prefix+"DATABASE_MIGRATE_TIMEOUT", cfg.DatabaseMigrateTimeout); err != nil {
+			return Config{}, err
+		}
 	}
 	if cfg.ReadHeaderTimeout, err = duration(prefix+"READ_HEADER_TIMEOUT", cfg.ReadHeaderTimeout); err != nil {
 		return Config{}, err

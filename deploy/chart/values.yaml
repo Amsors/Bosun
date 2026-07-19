@@ -8,6 +8,20 @@ database:
   storageClass: local-path
   storageSize: 10Gi
 
+# JWT 私钥等敏感值由部署者在集群外注入 Secret（spec/05），不写入 values。
+# 期望 Secret 含 key: private-key（PKCS#8 Ed25519 PEM）。
+auth:
+  jwtSecret: bosun-jwt
+  trustedProxyHeader: X-Forwarded-For
+
+ingress:
+  rateLimit:
+    enabled: true
+    average: 100
+    burst: 50
+    period: 1m
+    ipDepth: 1
+
 images:
   api: backend-api
   gateway: gateway

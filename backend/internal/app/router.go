@@ -8,17 +8,20 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Amsors/Bosun/backend/internal/apierr"
+	"github.com/Amsors/Bosun/backend/internal/auth"
 	"github.com/Amsors/Bosun/backend/internal/envelope"
+	"github.com/Amsors/Bosun/backend/internal/ratelimit"
 )
 
 type Pinger interface {
 	Ping(context.Context) error
 }
 
-func NewRouter(component string, database Pinger) http.Handler {
+// newEngine 构造带 recovery、request ID 与健康端点的基础 gin 引擎，api 与 gateway 共用。
+func newEngine(component string, database Pinger) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(gin.Recovery())
+	router.Use(gin.Recovery(), requestIDMiddleware())
 	router.GET("/healthz", func(c *gin.Context) {
 		envelope.OK(c, gin.H{"status": "ok", "component": component})
 	})
@@ -31,5 +34,51 @@ func NewRouter(component string, database Pinger) http.Handler {
 		}
 		envelope.OK(c, gin.H{"status": "ready", "component": component})
 	})
+	return router
+}
+
+// NewRouter 返回仅含健康端点的路由，供 gateway 等无业务路由的组件使用。
+func NewRouter(component string, database Pinger) http.Handler {
+	return newEngine(component, database)
+}
+
+// APIDeps 汇总 backend API 路由所需的依赖。
+type APIDeps struct {
+	Database           Pinger
+	Auth               *auth.Service
+	JWT                *auth.JWTIssuer
+	Store              auth.IdempotencyStore
+	LoginByIP          *ratelimit.Limiter
+	LoginByEmail       *ratelimit.Limiter
+	Cookie             CookieConfig
+	TrustedProxyHeader string
+	Now                func() time.Time
+}
+
+// NewAPIRouter 构造 backend API 的完整路由（认证 + 当前用户）。
+func NewAPIRouter(deps APIDeps) http.Handler {
+	now := deps.Now
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	h := &authHandler{
+		svc:                deps.Auth,
+		jwt:                deps.JWT,
+		store:              deps.Store,
+		loginByIP:          deps.LoginByIP,
+		loginByEmail:       deps.LoginByEmail,
+		cookie:             deps.Cookie,
+		trustedProxyHeader: deps.TrustedProxyHeader,
+		now:                now,
+	}
+
+	router := newEngine("api", deps.Database)
+	v1 := router.Group("/api/v1")
+	authGroup := v1.Group("/auth")
+	authGroup.POST("/register", h.register)
+	authGroup.POST("/login", h.login)
+	authGroup.POST("/refresh", h.refresh)
+	authGroup.POST("/logout", h.logout)
+	v1.GET("/me", h.requireAuth, h.me)
 	return router
 }

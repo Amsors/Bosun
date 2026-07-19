@@ -53,19 +53,24 @@ jobs:
       matrix:
         include:
           - image: backend-api
-            context: backend
+            context: .
+            dockerfile: backend/Dockerfile
             build_args: COMPONENT=api
           - image: gateway
-            context: backend
+            context: .
+            dockerfile: backend/Dockerfile
             build_args: COMPONENT=gateway
           - image: operator
             context: operator
+            dockerfile: operator/Dockerfile
             build_args: ""
           - image: frontend
             context: frontend
+            dockerfile: frontend/Dockerfile
             build_args: ""
           - image: agent
             context: images/agent
+            dockerfile: images/agent/Dockerfile
             build_args: ""
     steps:
       - name: Validate registry configuration
@@ -99,6 +104,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ env.REGISTRY }}/bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
           build-args: ${{ matrix.build_args }}

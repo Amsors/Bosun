@@ -45,6 +45,15 @@ func TestLoad(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:      "positive migration timeout required",
+			component: ComponentAPI,
+			env: map[string]string{
+				"BOSUN_DATABASE_URL":                 "postgres://db/bosun",
+				"BOSUN_API_DATABASE_MIGRATE_TIMEOUT": "0s",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -52,6 +61,7 @@ func TestLoad(t *testing.T) {
 			keys := []string{
 				"BOSUN_DATABASE_URL", "BOSUN_LOG_LEVEL",
 				"BOSUN_API_LISTEN_ADDRESS", "BOSUN_API_SHUTDOWN_TIMEOUT",
+				"BOSUN_API_DATABASE_MIGRATE_TIMEOUT",
 				"BOSUN_GATEWAY_LISTEN_ADDRESS", "BOSUN_GATEWAY_SHUTDOWN_TIMEOUT",
 				"BOSUN_GATEWAY_READ_HEADER_TIMEOUT", "BOSUN_GATEWAY_DATABASE_CONNECT_TIMEOUT",
 			}
@@ -71,6 +81,9 @@ func TestLoad(t *testing.T) {
 			}
 			if err == nil && got.ShutdownTimeout <= 0*time.Second {
 				t.Fatal("ShutdownTimeout must be positive")
+			}
+			if err == nil && tt.component == ComponentAPI && got.DatabaseMigrateTimeout <= 0*time.Second {
+				t.Fatal("DatabaseMigrateTimeout must be positive")
 			}
 		})
 	}

@@ -20,7 +20,9 @@ helm template bosun "${root}/deploy/chart" --namespace bosun-platform --include-
 
 generated="$(mktemp -d)"
 trap 'rm -rf "${generated}"' EXIT
-cp -R "${root}/operator/." "${generated}/operator"
+mkdir -p "${generated}/operator"
+(cd "${root}/operator" && tar --exclude='./bin' --exclude='./cover.out' -cf - .) |
+  (cd "${generated}/operator" && tar -xf -)
 (cd "${generated}/operator" && make manifests generate >/dev/null)
 diff -ru "${root}/operator/config/crd/bases" "${generated}/operator/config/crd/bases"
 diff -u "${root}/operator/api/v1alpha1/zz_generated.deepcopy.go" \

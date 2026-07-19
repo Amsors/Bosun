@@ -41,3 +41,50 @@ subjects:
   - kind: ServiceAccount
     name: bosun-operator
     namespace: {{ .Release.Namespace }}
+---
+# backend API 只对 CR 做 CRUD（techspec §9.2）；不授予 status 写权限（status 由 operator 独占），
+# 也不授予 Pod/PVC/Secret 集群级权限——那些通过 operator 在各用户 namespace 创建的 RoleBinding 下放。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-backend-api
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["bosun.io"]
+    resources: ["userenvironments", "agentsessions"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bosun-backend-api
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bosun-backend-api
+subjects:
+  - kind: ServiceAccount
+    name: bosun-backend-api
+    namespace: {{ .Release.Namespace }}
+---
+# UserEnvironment controller 在每个用户 namespace 创建 RoleBinding 绑定本角色。
+# Secret 权限严格只写，credential 明文只允许 gateway 读取（techspec §9.2）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bosun-user-backend-terminal
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "patch", "delete"]
