@@ -107,4 +107,5 @@ jobs:
             --set-string global.registry="${REGISTRY}/bosun" \
             --set-string global.imageTag="${IMAGE_TAG}" \
             --atomic \
-            --wait
+            --wait \
+            --timeout 15m
