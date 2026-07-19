@@ -125,7 +125,7 @@ spec:
     spec:
       nodeSelector: {role: edge}
       tolerations:
-        - {key: node-role.kubernetes.io/edge, operator: Exists, effect: NoSchedule}
+        - {key: bosun.io/edge, operator: Equal, value: "true", effect: NoSchedule}
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
