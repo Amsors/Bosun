@@ -18,6 +18,7 @@ type Store interface {
 	CreateWithEventAndIdempotency(context.Context, Session, Event, IdempotencyInput) error
 	CountActive(context.Context, uuid.UUID) (int64, error)
 	Get(context.Context, uuid.UUID, uuid.UUID) (Session, error)
+	GetByID(context.Context, uuid.UUID) (Session, error)
 	List(context.Context, uuid.UUID, int32, int32) (Page, error)
 	UpdateDesired(context.Context, Session, Event) (Session, error)
 	SoftDelete(context.Context, uuid.UUID, uuid.UUID, Event) (Session, error)
@@ -107,6 +108,19 @@ func (s *PgxStore) Get(ctx context.Context, userID, sessionID uuid.UUID) (Sessio
 	}
 	if err != nil {
 		return Session{}, fmt.Errorf("get session: %w", err)
+	}
+	return sessionFromRow(row)
+}
+
+// GetByID returns a session regardless of owner so terminal authorization can
+// distinguish a missing session from a cross-user access attempt.
+func (s *PgxStore) GetByID(ctx context.Context, sessionID uuid.UUID) (Session, error) {
+	row, err := s.q.GetSessionByID(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.DeletedAt != nil) {
+		return Session{}, ErrNotFound
+	}
+	if err != nil {
+		return Session{}, fmt.Errorf("get session by ID: %w", err)
 	}
 	return sessionFromRow(row)
 }

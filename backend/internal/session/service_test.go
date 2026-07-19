@@ -257,6 +257,13 @@ func (m *memoryStore) Get(_ context.Context, userID, id uuid.UUID) (Session, err
 	}
 	return rec, nil
 }
+func (m *memoryStore) GetByID(_ context.Context, id uuid.UUID) (Session, error) {
+	rec, ok := m.sessions[id]
+	if !ok || rec.DeletedAt != nil {
+		return Session{}, ErrNotFound
+	}
+	return rec, nil
+}
 func (m *memoryStore) List(_ context.Context, userID uuid.UUID, limit, offset int32) (Page, error) {
 	items := make([]Session, 0)
 	for _, rec := range m.sessions {

@@ -12,6 +12,16 @@ agent:
   storageClass: local-path
   idleScanInterval: 30s
 
+api:
+  terminal:
+    writeQueueCapacity: 64
+    inputQueueCapacity: 64
+    maxFrameBytes: 65536
+    writeTimeout: 10s
+    pongTimeout: 60s
+    pingInterval: 30s
+    activityMinInterval: 15s
+
 # 默认 provider key 由部署者在集群外创建 Secret，不进入 values（spec/05）。
 # 期望 Secret 的 key 由 secretKey 指定。
 gateway:

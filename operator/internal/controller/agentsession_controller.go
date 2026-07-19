@@ -456,10 +456,12 @@ func (r *AgentSessionReconciler) desiredPod(
 	pvcName string,
 ) *corev1.Pod {
 	agentRequests, agentLimits := tierAgentResources(session.Spec.Tier)
-	runAsUser := int64(1000)
+	runAsUser := int64(10001)
+	runAsGroup := int64(10001)
 	nonRoot := true
 	noPrivilege := false
 	readOnly := true
+	fsGroupChangePolicy := corev1.FSGroupChangeOnRootMismatch
 	tokenMode := int32(0o440)
 	expiration := int64(3600)
 	tcp := corev1.ProtocolTCP
@@ -480,8 +482,11 @@ func (r *AgentSessionReconciler) desiredPod(
 			ActiveDeadlineSeconds:         &session.Spec.ActiveDeadlineSeconds,
 			TerminationGracePeriodSeconds: ptrInt64(maxHibernateGrace),
 			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: &nonRoot,
-				RunAsUser:    &runAsUser,
+				RunAsNonRoot:        &nonRoot,
+				RunAsUser:           &runAsUser,
+				RunAsGroup:          &runAsGroup,
+				FSGroup:             &runAsGroup,
+				FSGroupChangePolicy: &fsGroupChangePolicy,
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},

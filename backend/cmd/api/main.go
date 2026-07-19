@@ -22,6 +22,7 @@ import (
 	"github.com/Amsors/Bosun/backend/internal/logging"
 	"github.com/Amsors/Bosun/backend/internal/ratelimit"
 	"github.com/Amsors/Bosun/backend/internal/session"
+	"github.com/Amsors/Bosun/backend/internal/terminal"
 	"github.com/Amsors/Bosun/backend/internal/userenv"
 )
 
@@ -38,6 +39,11 @@ func run() int {
 	authCfg, err := config.LoadAuth()
 	if err != nil {
 		slog.Error("invalid auth configuration", "reason", err)
+		return 1
+	}
+	terminalCfg, err := config.LoadTerminal()
+	if err != nil {
+		slog.Error("invalid terminal configuration", "reason", err)
 		return 1
 	}
 	logger := logging.New(cfg.LogLevel, string(config.ComponentAPI))
@@ -60,6 +66,11 @@ func run() int {
 	k8sClient, err := newK8sClient()
 	if err != nil {
 		logger.Error("kubernetes client init failed", "reason", err)
+		return 1
+	}
+	terminalRuntime, err := newTerminalRuntime()
+	if err != nil {
+		logger.Error("terminal Kubernetes clients init failed", "reason", err)
 		return 1
 	}
 
@@ -101,6 +112,19 @@ func run() int {
 	go sessionRepairer.Run(ctx)
 	projector := session.NewProjector(sessionStore, k8sClient, logger)
 	go projector.Run(ctx)
+	terminalHandler, err := terminal.NewHandler(terminal.Config{
+		WriteQueueCapacity:  terminalCfg.WriteQueueCapacity,
+		InputQueueCapacity:  terminalCfg.InputQueueCapacity,
+		MaxFrameBytes:       terminalCfg.MaxFrameBytes,
+		WriteTimeout:        terminalCfg.WriteTimeout,
+		PongTimeout:         terminalCfg.PongTimeout,
+		PingInterval:        terminalCfg.PingInterval,
+		ActivityMinInterval: terminalCfg.ActivityMinInterval,
+	}, issuer, sessionStore, terminalRuntime, logger)
+	if err != nil {
+		logger.Error("terminal handler init failed", "reason", err)
+		return 1
+	}
 
 	handler := app.NewAPIRouter(app.APIDeps{
 		Database:     pool,
@@ -117,6 +141,7 @@ func run() int {
 		},
 		TrustedProxyHeader: authCfg.TrustedProxyHeader,
 		Sessions:           sessionService,
+		Terminal:           terminalHandler,
 	})
 
 	server := &http.Server{
@@ -147,6 +172,16 @@ func run() int {
 	}
 	logger.Info("server stopped", "reason", "shutdown")
 	return 0
+}
+
+// newTerminalRuntime creates clients solely for terminal authorization and
+// pods/exec. These clients are intentionally separate from ordinary API clients.
+func newTerminalRuntime() (*terminal.KubernetesRuntime, error) {
+	restCfg, err := ctrlconfig.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return terminal.NewKubernetesRuntime(restCfg)
 }
 
 // newK8sClient 构造用于创建/读取 CR 的 typed client；使用 in-cluster 或本地 kubeconfig。

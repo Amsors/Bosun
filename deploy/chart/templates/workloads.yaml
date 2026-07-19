@@ -48,6 +48,20 @@ spec:
                   key: private-key
             - name: BOSUN_API_TRUSTED_PROXY_HEADER
               value: {{ $root.Values.auth.trustedProxyHeader | quote }}
+            - name: BOSUN_API_TERMINAL_WRITE_QUEUE_CAPACITY
+              value: {{ $root.Values.api.terminal.writeQueueCapacity | quote }}
+            - name: BOSUN_API_TERMINAL_INPUT_QUEUE_CAPACITY
+              value: {{ $root.Values.api.terminal.inputQueueCapacity | quote }}
+            - name: BOSUN_API_TERMINAL_MAX_FRAME_BYTES
+              value: {{ $root.Values.api.terminal.maxFrameBytes | quote }}
+            - name: BOSUN_API_TERMINAL_WRITE_TIMEOUT
+              value: {{ $root.Values.api.terminal.writeTimeout | quote }}
+            - name: BOSUN_API_TERMINAL_PONG_TIMEOUT
+              value: {{ $root.Values.api.terminal.pongTimeout | quote }}
+            - name: BOSUN_API_TERMINAL_PING_INTERVAL
+              value: {{ $root.Values.api.terminal.pingInterval | quote }}
+            - name: BOSUN_API_TERMINAL_ACTIVITY_MIN_INTERVAL
+              value: {{ $root.Values.api.terminal.activityMinInterval | quote }}
             {{- else }}
             - name: BOSUN_GATEWAY_UPSTREAM_URL
               value: {{ $root.Values.gateway.upstreamURL | quote }}

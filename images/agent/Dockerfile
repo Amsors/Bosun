@@ -28,16 +28,21 @@ RUN apt-get update \
         tmux \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 bosun \
-    && useradd --uid 10001 --gid bosun --create-home --shell /bin/bash bosun
+    && useradd --uid 10001 --gid bosun --create-home --shell /bin/bash bosun \
+    && install -d -m 0555 /etc/claude-code /usr/local/lib/bosun/hooks
 
 COPY --from=cli /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=cli /usr/local/bin/claude /usr/local/bin/claude
 COPY --from=auth-proxy /out/bosun-auth-proxy /usr/local/bin/bosun-auth-proxy
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/bosun-entrypoint
+COPY --chmod=0755 hooks/session-start.sh /usr/local/lib/bosun/hooks/session-start
+COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.json
 
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
-    HOME=/home/bosun \
-    TERM=xterm-256color
+    DISABLE_AUTOUPDATER=1 \
+    HOME=/workspace/.bosun-home \
+    TERM=xterm-256color \
+    TMUX_TMPDIR=/run/bosun-tmux
 USER 10001:10001
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/bosun-entrypoint"]

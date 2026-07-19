@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Amsors/Bosun/backend/internal/envelope"
 	"github.com/Amsors/Bosun/backend/internal/ratelimit"
 	"github.com/Amsors/Bosun/backend/internal/session"
+	"github.com/Amsors/Bosun/backend/internal/terminal"
 )
 
 type Pinger interface {
@@ -22,7 +24,7 @@ type Pinger interface {
 func newEngine(component string, database Pinger) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(gin.Recovery(), requestIDMiddleware())
+	router.Use(recoveryMiddleware(), requestIDMiddleware())
 	router.GET("/healthz", func(c *gin.Context) {
 		envelope.OK(c, gin.H{"status": "ok", "component": component})
 	})
@@ -36,6 +38,18 @@ func newEngine(component string, database Pinger) *gin.Engine {
 		envelope.OK(c, gin.H{"status": "ready", "component": component})
 	})
 	return router
+}
+
+// recoveryMiddleware intentionally never dumps request headers. The terminal
+// access JWT is carried in Sec-WebSocket-Protocol and must not enter logs even
+// when a handler panics.
+func recoveryMiddleware() gin.HandlerFunc {
+	return gin.CustomRecovery(func(c *gin.Context, _ any) {
+		requestID, _ := c.Get(ctxRequestID)
+		slog.Error("request panic recovered", "request_id", requestID, "reason", "panic")
+		apierr.Write(c, apierr.Internal)
+		c.Abort()
+	})
 }
 
 // NewRouter 返回仅含健康端点的路由，供 gateway 等无业务路由的组件使用。
@@ -55,6 +69,7 @@ type APIDeps struct {
 	TrustedProxyHeader string
 	Now                func() time.Time
 	Sessions           sessionService
+	Terminal           terminal.Service
 }
 
 // NewAPIRouter 构造 backend API 的完整路由（认证 + 当前用户）。
@@ -92,6 +107,12 @@ func NewAPIRouter(deps APIDeps) http.Handler {
 		group.POST("/:id/hibernate", sessions.transition(session.ActionHibernate))
 		group.POST("/:id/resume", sessions.transition(session.ActionResume))
 		group.POST("/:id/retry", sessions.transition(session.ActionRetry))
+	}
+	if deps.Terminal != nil {
+		v1.GET("/sessions/:id/terminal", func(c *gin.Context) {
+			deps.Terminal.ServeTerminal(c.Writer, c.Request, c.Param("id"))
+		})
+		router.GET("/metrics", gin.WrapH(deps.Terminal.MetricsHandler()))
 	}
 	return router
 }

@@ -48,6 +48,12 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if pod.Spec.ActiveDeadlineSeconds == nil || *pod.Spec.ActiveDeadlineSeconds != 28800 {
 		t.Fatalf("activeDeadlineSeconds = %v", pod.Spec.ActiveDeadlineSeconds)
 	}
+	if pod.Spec.SecurityContext == nil ||
+		pod.Spec.SecurityContext.RunAsUser == nil || *pod.Spec.SecurityContext.RunAsUser != 10001 ||
+		pod.Spec.SecurityContext.RunAsGroup == nil || *pod.Spec.SecurityContext.RunAsGroup != 10001 ||
+		pod.Spec.SecurityContext.FSGroup == nil || *pod.Spec.SecurityContext.FSGroup != 10001 {
+		t.Fatalf("Pod runtime identity = %#v", pod.Spec.SecurityContext)
+	}
 	if len(pod.Spec.Containers) != 2 {
 		t.Fatalf("containers = %d, want agent + auth-proxy", len(pod.Spec.Containers))
 	}
