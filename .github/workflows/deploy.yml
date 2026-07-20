@@ -70,6 +70,10 @@ jobs:
       - name: Validate deployment configuration
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+          PROVIDER_API_KEY: ${{ secrets.DEFAULT_PROVIDER_API_KEY }}
+          PROVIDER_NAME: ${{ vars.DEFAULT_PROVIDER_NAME }}
+          PROVIDER_UPSTREAM_URL: ${{ vars.DEFAULT_PROVIDER_UPSTREAM_URL }}
+          PROVIDER_AUTH_HEADER: ${{ vars.DEFAULT_PROVIDER_AUTH_HEADER }}
         run: |
           set -euo pipefail
           [[ -n "${REGISTRY}" ]] || {
@@ -78,6 +82,22 @@ jobs:
           }
           [[ -n "${KUBECONFIG_B64}" ]] || {
             echo "KUBECONFIG_B64 secret is not configured" >&2
+            exit 1
+          }
+          [[ -n "${PROVIDER_API_KEY}" ]] || {
+            echo "DEFAULT_PROVIDER_API_KEY production secret is not configured" >&2
+            exit 1
+          }
+          [[ -n "${PROVIDER_NAME}" ]] || {
+            echo "DEFAULT_PROVIDER_NAME production variable is not configured" >&2
+            exit 1
+          }
+          [[ -n "${PROVIDER_UPSTREAM_URL}" ]] || {
+            echo "DEFAULT_PROVIDER_UPSTREAM_URL production variable is not configured" >&2
+            exit 1
+          }
+          [[ -n "${PROVIDER_AUTH_HEADER}" ]] || {
+            echo "DEFAULT_PROVIDER_AUTH_HEADER production variable is not configured" >&2
             exit 1
           }
       - uses: actions/checkout@v4
@@ -91,6 +111,11 @@ jobs:
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          PROVIDER_API_KEY: ${{ secrets.DEFAULT_PROVIDER_API_KEY }}
+          PROVIDER_NAME: ${{ vars.DEFAULT_PROVIDER_NAME }}
+          PROVIDER_UPSTREAM_URL: ${{ vars.DEFAULT_PROVIDER_UPSTREAM_URL }}
+          PROVIDER_AUTH_HEADER: ${{ vars.DEFAULT_PROVIDER_AUTH_HEADER }}
+          PROVIDER_AUTH_SCHEME: ${{ vars.DEFAULT_PROVIDER_AUTH_SCHEME }}
         run: |
           set -euo pipefail
           kubeconfig="${RUNNER_TEMP}/bosun-kubeconfig"
@@ -101,11 +126,22 @@ jobs:
           umask 077
           printf '%s' "${KUBECONFIG_B64}" | base64 --decode > "${kubeconfig}"
           export KUBECONFIG="${kubeconfig}"
+          printf '%s' "${PROVIDER_API_KEY}" |
+            kubectl create secret generic bosun-default-provider \
+              --namespace bosun-platform \
+              --from-file=api-key=/dev/stdin \
+              --dry-run=client \
+              --output yaml |
+            kubectl apply --filename -
           helm upgrade --install bosun deploy/chart \
             --namespace bosun-platform \
             --create-namespace \
             --set-string global.registry="${REGISTRY}/bosun" \
             --set-string global.imageTag="${IMAGE_TAG}" \
+            --set-string gateway.provider="${PROVIDER_NAME}" \
+            --set-string gateway.upstreamURL="${PROVIDER_UPSTREAM_URL}" \
+            --set-string gateway.upstreamAuthHeader="${PROVIDER_AUTH_HEADER}" \
+            --set-string gateway.upstreamAuthScheme="${PROVIDER_AUTH_SCHEME}" \
             --atomic \
             --wait \
             --timeout 15m
