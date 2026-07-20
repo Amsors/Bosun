@@ -42,7 +42,7 @@ jobs:
         with:
           version: v2.12.2
           working-directory: backend
-      - run: go test ./...
+      - run: go test -p 1 ./...
       - run: go build ./cmd/api ./cmd/gateway
       - run: docker build --build-arg COMPONENT=api --file backend/Dockerfile .
         working-directory: .
