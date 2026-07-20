@@ -81,6 +81,8 @@ jobs:
         env:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "${REGISTRY}" ]] || {
@@ -95,6 +97,14 @@ jobs:
             echo "ACR_PASSWORD secret is not configured" >&2
             exit 1
           }
+          [[ -n "${DOCKERHUB_USERNAME}" ]] || {
+            echo "DOCKERHUB_USERNAME secret is not configured" >&2
+            exit 1
+          }
+          [[ -n "${DOCKERHUB_TOKEN}" ]] || {
+            echo "DOCKERHUB_TOKEN secret is not configured" >&2
+            exit 1
+          }
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.commit_sha }}
@@ -105,12 +115,19 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ env.REGISTRY }}/bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
+          tags: |
+            ${{ env.REGISTRY }}/bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
+            bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
           build-args: ${{ matrix.build_args }}
 
   metadata:
