@@ -70,6 +70,7 @@ jobs:
       - name: Validate deployment configuration
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           PROVIDER_API_KEY: ${{ secrets.DEFAULT_PROVIDER_API_KEY }}
           PROVIDER_NAME: ${{ vars.DEFAULT_PROVIDER_NAME }}
           PROVIDER_UPSTREAM_URL: ${{ vars.DEFAULT_PROVIDER_UPSTREAM_URL }}
@@ -82,6 +83,10 @@ jobs:
           }
           [[ -n "${KUBECONFIG_B64}" ]] || {
             echo "KUBECONFIG_B64 secret is not configured" >&2
+            exit 1
+          }
+          [[ -n "${JWT_PRIVATE_KEY}" ]] || {
+            echo "JWT_PRIVATE_KEY production secret is not configured" >&2
             exit 1
           }
           [[ -n "${PROVIDER_API_KEY}" ]] || {
@@ -111,6 +116,7 @@ jobs:
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           PROVIDER_API_KEY: ${{ secrets.DEFAULT_PROVIDER_API_KEY }}
           PROVIDER_NAME: ${{ vars.DEFAULT_PROVIDER_NAME }}
           PROVIDER_UPSTREAM_URL: ${{ vars.DEFAULT_PROVIDER_UPSTREAM_URL }}
@@ -126,6 +132,13 @@ jobs:
           umask 077
           printf '%s' "${KUBECONFIG_B64}" | base64 --decode > "${kubeconfig}"
           export KUBECONFIG="${kubeconfig}"
+          printf '%s' "${JWT_PRIVATE_KEY}" |
+            kubectl create secret generic bosun-jwt \
+              --namespace bosun-platform \
+              --from-file=private-key=/dev/stdin \
+              --dry-run=client \
+              --output yaml |
+            kubectl apply --filename -
           printf '%s' "${PROVIDER_API_KEY}" |
             kubectl create secret generic bosun-default-provider \
               --namespace bosun-platform \
