@@ -72,6 +72,10 @@ jobs:
             context: images/agent
             dockerfile: images/agent/Dockerfile
             build_args: ""
+          - image: egress-proxy
+            context: images/egress-proxy
+            dockerfile: images/egress-proxy/Dockerfile
+            build_args: ""
     steps:
       - name: Validate registry configuration
         env:
