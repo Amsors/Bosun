@@ -12,6 +12,24 @@ export interface PaginatedData<T> {
   total: number
 }
 
+export interface User {
+  id: UUID
+  email: string
+  createdAt: RFC3339Timestamp
+}
+
+export interface AuthData {
+  accessToken: string
+  tokenType: string
+  accessExpiresAt: RFC3339Timestamp
+  user: User
+}
+
+export interface MeData {
+  user: User
+  environmentPhase: EnvironmentPhase
+}
+
 export const apiErrorCodes = {
   invalidArgument: 10001,
   idempotencyConflict: 10002,

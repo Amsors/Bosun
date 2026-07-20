@@ -23,3 +23,13 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   return envelope.data
 }
+
+export function authenticatedRequest(
+  token: string,
+): <T>(path: string, init?: RequestInit) => Promise<T> {
+  return <T>(path: string, init: RequestInit = {}) =>
+    request<T>(path, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, ...init.headers },
+    })
+}
