@@ -126,7 +126,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.REGISTRY }}/bosun/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
+            ${{ env.REGISTRY }}/amsors/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
           build-args: ${{ matrix.build_args }}
 

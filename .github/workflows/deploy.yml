@@ -158,7 +158,7 @@ jobs:
           helm upgrade --install bosun deploy/chart \
             --namespace bosun-platform \
             --create-namespace \
-            --set-string global.registry="${REGISTRY}/bosun" \
+            --set-string global.registry="${REGISTRY}/amsors" \
             --set-string global.imageTag="${IMAGE_TAG}" \
             --set-string gateway.provider="${PROVIDER_NAME}" \
             --set-string gateway.upstreamURL="${PROVIDER_UPSTREAM_URL}" \
