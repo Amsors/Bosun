@@ -38,6 +38,11 @@ done
 docker exec "${container}" tmux has-session -t bosun
 docker exec "${container}" tmux capture-pane -p -t bosun |
   grep -q 'bosun-shell-restarted'
+docker exec "${container}" tmux send-keys -t bosun -l "printf '中文 ─╭╯ ✓ ⏺ ⎿ 🟢'"
+docker exec "${container}" tmux send-keys -t bosun Enter
+sleep 0.1
+docker exec "${container}" tmux capture-pane -p -t bosun |
+  grep -Fq '中文 ─╭╯ ✓ ⏺ ⎿ 🟢'
 docker exec "${container}" test "$(docker exec "${container}" id -u)" -eq 10001
 docker exec "${container}" test ! -w /etc/claude-code/managed-settings.json
 docker exec "${container}" test ! -w /usr/local/lib/bosun/hooks/session-start

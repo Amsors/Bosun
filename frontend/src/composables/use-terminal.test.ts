@@ -230,10 +230,59 @@ describe('useTerminal', () => {
     expect(controller.status.value).toBe('slow')
     scope.stop()
   })
+
+  it('preserves UTF-8 input and output used by Chinese text and Claude Code', () => {
+    const sockets: FakeWebSocket[] = []
+    const output: Uint8Array[] = []
+    const scope = effectScope()
+    const controller = scope.run(() =>
+      useTerminal({
+        sessionId: 'session-id',
+        getAccessToken: () => 'access-token',
+        refreshAccessToken: async () => 'access-token',
+        getSessionPhase: async () => 'Running',
+        onOutput: (data) => output.push(data),
+        webSocketFactory: (url, protocols) => {
+          const socket = new FakeWebSocket(url, protocols)
+          sockets.push(socket)
+          return socket
+        },
+      }),
+    )
+    if (controller === undefined) {
+      throw new Error('controller was not created')
+    }
+
+    controller.connect()
+    const socket = sockets[0]
+    socket?.open()
+
+    const text = '中文输入 ─╭╯ ✓ ⏺ ⎿ 🟢'
+    expect(controller.sendInput(text)).toBe(true)
+    const inputFrame = JSON.parse(socket?.sent[0] ?? '{}') as {
+      t?: string
+      d?: string
+    }
+    expect(inputFrame.t).toBe('stdin')
+    expect(new TextDecoder().decode(decodeTestBase64(inputFrame.d ?? ''))).toBe(text)
+
+    const encodedOutput = encodeTestBase64(new TextEncoder().encode(text))
+    socket?.receive(JSON.stringify({ t: 'stdout', d: encodedOutput }))
+    expect(new TextDecoder().decode(output[0])).toBe(text)
+    scope.stop()
+  })
 })
 
 async function flushPromises(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
+}
+
+function encodeTestBase64(data: Uint8Array): string {
+  return btoa(String.fromCharCode(...data))
+}
+
+function decodeTestBase64(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0))
 }

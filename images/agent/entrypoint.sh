@@ -5,6 +5,9 @@ if [[ "${1:-}" == "--smoke-test" ]]; then
   test "$(id -u)" -ne 0
   test "$(node --version)" = "v24.14.0"
   test "$(claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}"
+  test "${LANG}" = "C.UTF-8"
+  test "${LC_ALL}" = "C.UTF-8"
+  test "$(locale charmap)" = "UTF-8"
   test -x /usr/local/bin/bosun-auth-proxy
   test -x /usr/local/lib/bosun/hooks/session-start
   test -r /etc/claude-code/managed-settings.json

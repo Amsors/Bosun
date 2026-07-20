@@ -44,6 +44,8 @@ COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     DISABLE_AUTOUPDATER=1 \
     HOME=/workspace/.bosun-home \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
     TERM=xterm-256color \
     TMUX_TMPDIR=/run/bosun-tmux
 USER 10001:10001
