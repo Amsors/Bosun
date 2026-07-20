@@ -16,10 +16,23 @@ if rg --hidden --glob='!**/.git/**' --glob='!**/node_modules/**' \
 fi
 
 helm lint "${root}/deploy/chart" --kube-version 1.36.0
-helm template bosun "${root}/deploy/chart" \
+rendered="$(helm template bosun "${root}/deploy/chart" \
   --namespace bosun-platform \
   --kube-version 1.36.0 \
-  --include-crds >/dev/null
+  --include-crds)"
+
+if ! grep -A4 'resources: \["clusterroles"\]' <<<"${rendered}" |
+  grep -A2 'resourceNames: \["bosun-user-backend-terminal"\]' |
+  grep -q 'verbs: \["bind"\]'; then
+  echo "operator is missing the scoped ClusterRole bind permission" >&2
+  exit 1
+fi
+
+if ! grep -A2 'resources: \["agentsessions"\]' <<<"${rendered}" |
+  grep -q 'verbs: \["patch", "update"\]'; then
+  echo "operator is missing AgentSession metadata update permissions" >&2
+  exit 1
+fi
 
 generated="$(mktemp -d)"
 trap 'rm -rf "${generated}"' EXIT
