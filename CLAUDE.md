@@ -56,6 +56,7 @@ Bosun/
 ├── operator/             # kubebuilder 工程，AgentSession CRD 与控制器
 ├── frontend/             # Vue 3 SPA
 ├── images/               # agent 运行时等 Dockerfile
+├── e2e/                  # 跨组件真实 k3s smoke 与 E2E
 └── deploy/               # Helm chart 与集群配置
 ```
 
