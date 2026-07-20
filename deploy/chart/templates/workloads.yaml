@@ -198,3 +198,17 @@ spec:
         - {name: cache, emptyDir: {sizeLimit: 16Mi}}
         - {name: run, emptyDir: {sizeLimit: 1Mi}}
         - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bosun-frontend
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: bosun-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
