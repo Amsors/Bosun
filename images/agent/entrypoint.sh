@@ -13,6 +13,7 @@ if [[ "${1:-}" == "--smoke-test" ]]; then
 fi
 
 mkdir -p "${HOME}" "${TMUX_TMPDIR}"
+printf '%s\n' '{"hasCompletedOnboarding":true}' > "${HOME}/.claude.json"
 
 if ! tmux has-session -t bosun 2>/dev/null; then
   tmux new-session -d -s bosun -c /workspace

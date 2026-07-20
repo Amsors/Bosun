@@ -26,6 +26,8 @@ RUN apt-get update \
         procps \
         ripgrep \
         tmux \
+        nano \
+        python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 bosun \
     && useradd --uid 10001 --gid bosun --create-home --shell /bin/bash bosun \

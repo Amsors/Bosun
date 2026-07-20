@@ -27,6 +27,8 @@ docker exec "${container}" test "$(docker exec "${container}" id -u)" -eq 10001
 docker exec "${container}" test ! -w /etc/claude-code/managed-settings.json
 docker exec "${container}" test ! -w /usr/local/lib/bosun/hooks/session-start
 docker exec "${container}" test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/.claude.json)" = "10001:10001"
+docker exec "${container}" jq -e '.hasCompletedOnboarding == true' /workspace/.bosun-home/.claude.json >/dev/null
 docker exec "${container}" jq -e \
   '.allowManagedHooksOnly == true and
    .hooks.SessionStart[0].hooks[0].command == "/usr/local/lib/bosun/hooks/session-start"' \
