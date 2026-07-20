@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { FitAddon } from '@xterm/addon-fit'
-import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -60,7 +59,6 @@ onMounted(() => {
     theme: { background: '#101418', foreground: '#e7edf3' },
   })
   fitAddon = new FitAddon()
-  xterm.loadAddon(new UnicodeGraphemesAddon())
   xterm.loadAddon(fitAddon)
   xterm.open(host.value)
   xterm.onData((data) => terminal.sendInput(data))
