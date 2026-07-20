@@ -37,6 +37,7 @@ COPY --from=cli /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=cli /usr/local/bin/claude /usr/local/bin/claude
 COPY --from=auth-proxy /out/bosun-auth-proxy /usr/local/bin/bosun-auth-proxy
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/bosun-entrypoint
+COPY --chmod=0755 shell-supervisor.sh /usr/local/bin/bosun-shell-supervisor
 COPY --chmod=0755 hooks/session-start.sh /usr/local/lib/bosun/hooks/session-start
 COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.json
 

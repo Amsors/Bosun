@@ -37,6 +37,8 @@ const notice = computed(() => {
       return '会话已休眠，请先恢复会话再打开终端'
     case 'replaced':
       return '终端已在另一个窗口打开，本窗口连接已停止'
+    case 'ended':
+      return '终端运行时已结束，请恢复或重建会话后重试'
     case 'error':
       return '终端连接异常，正在检查会话状态'
     default:

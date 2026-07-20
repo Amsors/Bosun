@@ -9,6 +9,7 @@ import {
 
 const socketOpen = 1
 const replacedCloseCode = 4001
+const runtimeEndedCloseCode = 4004
 const authenticationCloseCode = 4401
 const defaultBufferedAmountLimit = 256 * 1024
 const defaultInputChunkSize = 48 * 1024
@@ -21,6 +22,7 @@ export type TerminalConnectionStatus =
   | 'slow'
   | 'hibernated'
   | 'replaced'
+  | 'ended'
   | 'closed'
   | 'error'
 
@@ -143,6 +145,11 @@ export function useTerminal(options: UseTerminalOptions): TerminalController {
       if (event.code === replacedCloseCode) {
         stopped = true
         status.value = 'replaced'
+        return
+      }
+      if (event.code === runtimeEndedCloseCode) {
+        stopped = true
+        status.value = 'ended'
         return
       }
       if ((!opened || event.code === authenticationCloseCode) && !refreshAttempted) {

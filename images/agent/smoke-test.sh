@@ -23,6 +23,21 @@ done
 
 docker exec "${container}" /usr/local/bin/bosun-entrypoint --smoke-test
 docker exec "${container}" tmux has-session -t bosun
+docker exec "${container}" tmux send-keys -t bosun exit Enter
+for _ in {1..20}; do
+  if docker exec "${container}" tmux has-session -t bosun 2>/dev/null; then
+    docker exec "${container}" tmux send-keys -t bosun 'printf bosun-shell-restarted' Enter
+    sleep 0.1
+    if docker exec "${container}" tmux capture-pane -p -t bosun |
+      grep -q 'bosun-shell-restarted'; then
+      break
+    fi
+  fi
+  sleep 0.25
+done
+docker exec "${container}" tmux has-session -t bosun
+docker exec "${container}" tmux capture-pane -p -t bosun |
+  grep -q 'bosun-shell-restarted'
 docker exec "${container}" test "$(docker exec "${container}" id -u)" -eq 10001
 docker exec "${container}" test ! -w /etc/claude-code/managed-settings.json
 docker exec "${container}" test ! -w /usr/local/lib/bosun/hooks/session-start

@@ -16,7 +16,7 @@ mkdir -p "${HOME}" "${TMUX_TMPDIR}"
 printf '%s\n' '{"hasCompletedOnboarding":true}' > "${HOME}/.claude.json"
 
 if ! tmux has-session -t bosun 2>/dev/null; then
-  tmux new-session -d -s bosun -c /workspace
+  tmux new-session -d -s bosun -c /workspace /usr/local/bin/bosun-shell-supervisor
 fi
 
 if (($# > 0)); then

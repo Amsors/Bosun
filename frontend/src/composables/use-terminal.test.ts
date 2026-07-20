@@ -154,6 +154,40 @@ describe('useTerminal', () => {
     scope.stop()
   })
 
+  it('stops reconnecting when the terminal runtime has ended', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    const getSessionPhase = vi.fn(async (): Promise<SessionPhase> => 'Running')
+    const scope = effectScope()
+    const controller = scope.run(() =>
+      useTerminal({
+        sessionId: 'session-id',
+        getAccessToken: () => 'access-token',
+        refreshAccessToken: async () => 'access-token',
+        getSessionPhase,
+        onOutput: () => undefined,
+        webSocketFactory: (url, protocols) => {
+          const socket = new FakeWebSocket(url, protocols)
+          sockets.push(socket)
+          return socket
+        },
+      }),
+    )
+    if (controller === undefined) {
+      throw new Error('controller was not created')
+    }
+
+    controller.connect()
+    sockets[0]?.open()
+    sockets[0]?.close(4004, 'terminal_runtime_ended')
+    await vi.runAllTimersAsync()
+
+    expect(controller.status.value).toBe('ended')
+    expect(sockets).toHaveLength(1)
+    expect(getSessionPhase).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
   it('encodes frames and exposes bounded browser send backpressure', () => {
     const sockets: FakeWebSocket[] = []
     const output: Uint8Array[] = []
