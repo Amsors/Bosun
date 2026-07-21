@@ -1,48 +1,49 @@
 name: Publish images
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       git_sha:
-        description: Full commit SHA to publish; defaults to the selected branch HEAD
-        required: false
+        description: Full commit SHA on main to publish after CI has passed
+        required: true
         type: string
 
 permissions:
   contents: read
+
+concurrency:
+  group: publish-${{ inputs.git_sha }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ${{ vars.ACR_REGISTRY }}
 
 jobs:
   prepare:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.ref.outputs.commit_sha }}
       image_tag: ${{ steps.ref.outputs.image_tag }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: ref
-        name: Resolve immutable image tag
+        name: Validate immutable image tag
         env:
           DISPATCH_SHA: ${{ inputs.git_sha }}
-          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
-          DEFAULT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          commit_sha="${DISPATCH_SHA:-${EVENT_SHA:-${DEFAULT_SHA}}}"
-          if [[ ! "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ! "${DISPATCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "git_sha must be a full 40-character lowercase commit SHA" >&2
             exit 1
           fi
-          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
-          echo "image_tag=${commit_sha::7}" >> "${GITHUB_OUTPUT}"
+          if ! git merge-base --is-ancestor "${DISPATCH_SHA}" origin/main; then
+            echo "git_sha must identify a commit reachable from main" >&2
+            exit 1
+          fi
+          echo "commit_sha=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${DISPATCH_SHA::7}" >> "${GITHUB_OUTPUT}"
 
   images:
     needs: prepare
@@ -85,26 +86,12 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          [[ -n "${REGISTRY}" ]] || {
-            echo "ACR_REGISTRY variable is not configured" >&2
-            exit 1
-          }
-          [[ -n "${ACR_USERNAME}" ]] || {
-            echo "ACR_USERNAME secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${ACR_PASSWORD}" ]] || {
-            echo "ACR_PASSWORD secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${DOCKERHUB_USERNAME}" ]] || {
-            echo "DOCKERHUB_USERNAME secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${DOCKERHUB_TOKEN}" ]] || {
-            echo "DOCKERHUB_TOKEN secret is not configured" >&2
-            exit 1
-          }
+          for name in REGISTRY ACR_USERNAME ACR_PASSWORD DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "${name} is not configured" >&2
+              exit 1
+            fi
+          done
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.commit_sha }}
@@ -129,21 +116,5 @@ jobs:
             ${{ env.REGISTRY }}/amsors/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}:${{ needs.prepare.outputs.image_tag }}
           build-args: ${{ matrix.build_args }}
-
-  metadata:
-    needs: [prepare, images]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Write deployment metadata
-        env:
-          COMMIT_SHA: ${{ needs.prepare.outputs.commit_sha }}
-        run: |
-          set -euo pipefail
-          install -d deployment-metadata
-          printf '%s\n' "${COMMIT_SHA}" > deployment-metadata/commit_sha
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deployment-metadata
-          path: deployment-metadata/commit_sha
-          retention-days: 7
-          if-no-files-found: error
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

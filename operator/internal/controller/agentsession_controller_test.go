@@ -57,6 +57,10 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if len(pod.Spec.Containers) != 2 {
 		t.Fatalf("containers = %d, want agent + auth-proxy", len(pod.Spec.Containers))
 	}
+	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways ||
+		pod.Spec.Containers[1].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("agent image pull policies = %q, %q", pod.Spec.Containers[0].ImagePullPolicy, pod.Spec.Containers[1].ImagePullPolicy)
+	}
 	assertRestrictedContainer(t, pod.Spec.Containers[0])
 	assertRestrictedContainer(t, pod.Spec.Containers[1])
 	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("240m")) != 0 ||
@@ -346,6 +350,7 @@ func newAgentSessionReconciler() *AgentSessionReconciler {
 	return &AgentSessionReconciler{
 		Client: testClient, Scheme: testScheme,
 		AgentImage:       "registry.example/agent:1234567",
+		AgentPullPolicy:  corev1.PullAlways,
 		StorageClassName: "local-path", GatewayURL: "http://bosun-gateway:8081",
 		EgressProxyURL: "http://bosun-egress-proxy:3128", IdleScanInterval: time.Millisecond,
 	}

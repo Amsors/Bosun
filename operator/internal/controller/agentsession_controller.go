@@ -55,6 +55,7 @@ type AgentSessionReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	AgentImage       string
+	AgentPullPolicy  corev1.PullPolicy
 	StorageClassName string
 	GatewayURL       string
 	EgressProxyURL   string
@@ -495,8 +496,9 @@ func (r *AgentSessionReconciler) desiredPod(
 			Tolerations: agentTolerations(),
 			Containers: []corev1.Container{
 				{
-					Name:  "agent",
-					Image: r.AgentImage,
+					Name:            "agent",
+					Image:           r.AgentImage,
+					ImagePullPolicy: r.AgentPullPolicy,
 					Env: []corev1.EnvVar{
 						{Name: "ANTHROPIC_BASE_URL", Value: "http://127.0.0.1:8080"},
 						{Name: "ANTHROPIC_API_KEY", Value: "sk-xxxx"},
@@ -514,11 +516,12 @@ func (r *AgentSessionReconciler) desiredPod(
 					LivenessProbe:  execProbe("tmux", "has-session", "-t", "bosun"),
 				},
 				{
-					Name:    "auth-proxy",
-					Image:   r.AgentImage,
-					Command: []string{"/usr/local/bin/bosun-auth-proxy"},
-					Args:    []string{"--listen=127.0.0.1:8080", "--upstream=" + r.GatewayURL, "--token-file=/var/run/secrets/bosun/token"},
-					Ports:   []corev1.ContainerPort{{Name: "proxy", ContainerPort: 8080, Protocol: tcp}},
+					Name:            "auth-proxy",
+					Image:           r.AgentImage,
+					ImagePullPolicy: r.AgentPullPolicy,
+					Command:         []string{"/usr/local/bin/bosun-auth-proxy"},
+					Args:            []string{"--listen=127.0.0.1:8080", "--upstream=" + r.GatewayURL, "--token-file=/var/run/secrets/bosun/token"},
+					Ports:           []corev1.ContainerPort{{Name: "proxy", ContainerPort: 8080, Protocol: tcp}},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi"),

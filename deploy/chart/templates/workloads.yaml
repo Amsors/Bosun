@@ -129,10 +129,12 @@ spec:
       containers:
         - name: operator
           image: {{ include "bosun.image" (dict "root" . "name" .Values.images.operator) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args:
             - "--health-probe-bind-address=:8081"
             - "--platform-namespace={{ .Release.Namespace }}"
             - {{ printf "--agent-image=%s" (include "bosun.image" (dict "root" . "name" .Values.images.agent)) | quote }}
+            - "--agent-image-pull-policy={{ .Values.agent.imagePullPolicy }}"
             - "--workspace-storage-class={{ .Values.agent.storageClass }}"
             - "--gateway-url=http://bosun-gateway.{{ .Release.Namespace }}.svc:8081"
             - "--egress-proxy-url=http://bosun-egress-proxy.{{ .Release.Namespace }}.svc:3128"
@@ -177,6 +179,7 @@ spec:
       containers:
         - name: frontend
           image: {{ include "bosun.image" (dict "root" . "name" .Values.images.frontend) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - {name: http, containerPort: 8080}
           resources:

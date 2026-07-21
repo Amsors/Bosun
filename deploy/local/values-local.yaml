@@ -1,0 +1,16 @@
+global:
+  registry: k3d-bosun-registry:5000/amsors
+  imagePullPolicy: Always
+
+database:
+  storageSize: 2Gi
+
+agent:
+  imagePullPolicy: Always
+
+auth:
+  trustedProxyHeader: ""
+
+ingress:
+  rateLimit:
+    enabled: false

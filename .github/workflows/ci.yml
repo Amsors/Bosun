@@ -8,8 +8,35 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      operator: ${{ steps.changes.outputs.operator }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      agent_image: ${{ steps.changes.outputs.agent_image }}
+      egress_image: ${{ steps.changes.outputs.egress_image }}
+      delivery: ${{ steps.changes.outputs.delivery }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: changes
+        name: Detect affected modules
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./deploy/scripts/ci-changes.sh "${BASE_SHA}" "${HEAD_SHA}"
+
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     env:
       BOSUN_TEST_DATABASE_URL: postgres://bosun:bosun@127.0.0.1:5432/bosun?sslmode=disable
@@ -37,17 +64,19 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.2
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: |
+            backend/go.sum
+            operator/go.sum
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           working-directory: backend
       - run: go test -p 1 ./...
       - run: go build ./cmd/api ./cmd/gateway
-      - run: docker build --build-arg COMPONENT=api --file backend/Dockerfile .
-        working-directory: .
 
   operator:
+    needs: changes
+    if: needs.changes.outputs.operator == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,6 +97,8 @@ jobs:
       - run: git diff --exit-code -- config/crd/bases api/v1alpha1/zz_generated.deepcopy.go
 
   frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,15 +118,75 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  agent_image:
+    name: agent-image
+    needs: changes
+    if: needs.changes.outputs.agent_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./images/agent/smoke-test.sh bosun-agent:ci
+
+  egress_image:
+    name: egress-image
+    needs: changes
+    if: needs.changes.outputs.egress_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --file images/egress-proxy/Dockerfile images/egress-proxy
+
   delivery:
+    needs: changes
+    if: needs.changes.outputs.delivery == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.2
+          cache: false
       - uses: azure/setup-helm@v4
         with:
           version: v4.2.3
-      - run: helm lint deploy/chart
-      - name: Reject latest tags and likely secrets
+      - name: Check GitHub Actions workflows
+        run: |
+          set -euo pipefail
+          GOBIN="${RUNNER_TEMP}" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "${RUNNER_TEMP}/actionlint"
+      - name: Reject latest tags, likely secrets, and stale generated manifests
         run: ./deploy/scripts/validate-m0.sh
+      - name: Check delivery shell scripts
+        run: shellcheck -x -P e2e deploy/scripts/*.sh e2e/*.sh
+
+  ci_gate:
+    name: ci-gate
+    if: always()
+    needs: [changes, backend, operator, frontend, agent_image, egress_image, delivery]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every affected module to pass
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          OPERATOR_RESULT: ${{ needs.operator.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          AGENT_IMAGE_RESULT: ${{ needs.agent_image.result }}
+          EGRESS_IMAGE_RESULT: ${{ needs.egress_image.result }}
+          DELIVERY_RESULT: ${{ needs.delivery.result }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "${CHANGES_RESULT}" \
+            "${BACKEND_RESULT}" \
+            "${OPERATOR_RESULT}" \
+            "${FRONTEND_RESULT}" \
+            "${AGENT_IMAGE_RESULT}" \
+            "${EGRESS_IMAGE_RESULT}" \
+            "${DELIVERY_RESULT}"; do
+            if [[ "${result}" == "failure" || "${result}" == "cancelled" ]]; then
+              exit 1
+            fi
+          done

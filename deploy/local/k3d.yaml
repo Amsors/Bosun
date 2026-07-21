@@ -1,0 +1,25 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: bosun
+servers: 1
+agents: 2
+image: rancher/k3s:v1.36.1-k3s1
+# 固定 API server 到 127.0.0.1，避免 k3d 在原生 Linux 上把 kubeconfig 写成
+# host.docker.internal（会解析到不可路由的 docker 网桥网关，导致 kubectl 超时）。
+kubeAPI:
+  host: "127.0.0.1"
+  hostIP: "127.0.0.1"
+  hostPort: "6445"
+registries:
+  use:
+    - k3d-bosun-registry:5000
+options:
+  k3d:
+    wait: true
+    timeout: 180s
+  k3s:
+    extraArgs:
+      - arg: --secrets-encryption
+        nodeFilters:
+          - server:*

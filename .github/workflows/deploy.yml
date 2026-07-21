@@ -1,19 +1,14 @@
 name: Deploy production
 
 on:
-  workflow_run:
-    workflows: ["Publish images"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       git_sha:
-        description: Full commit SHA whose images are already present in ACR
+        description: Full commit SHA on main whose six images are already present in ACR
         required: true
         type: string
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -25,42 +20,30 @@ env:
 
 jobs:
   prepare:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.ref.outputs.commit_sha }}
       image_tag: ${{ steps.ref.outputs.image_tag }}
     steps:
-      - name: Download published image metadata
-        if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: deployment-metadata
-          path: deployment-metadata
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ github.token }}
+          fetch-depth: 0
       - id: ref
-        name: Resolve published image tag
+        name: Validate published image tag
         env:
           DISPATCH_SHA: ${{ inputs.git_sha }}
         run: |
           set -euo pipefail
-          if [[ -n "${DISPATCH_SHA}" ]]; then
-            commit_sha="${DISPATCH_SHA}"
-          elif [[ -f deployment-metadata/commit_sha ]]; then
-            commit_sha="$(< deployment-metadata/commit_sha)"
-          else
-            echo "published image metadata is unavailable" >&2
-            exit 1
-          fi
-          if [[ ! "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ! "${DISPATCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "git_sha must be a full 40-character lowercase commit SHA" >&2
             exit 1
           fi
-          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
-          echo "image_tag=${commit_sha::7}" >> "${GITHUB_OUTPUT}"
+          if ! git merge-base --is-ancestor "${DISPATCH_SHA}" origin/main; then
+            echo "git_sha must identify a commit reachable from main" >&2
+            exit 1
+          fi
+          echo "commit_sha=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${DISPATCH_SHA::7}" >> "${GITHUB_OUTPUT}"
 
   deploy:
     needs: prepare
@@ -78,34 +61,13 @@ jobs:
           PROVIDER_AUTH_SCHEME: ${{ vars.DEFAULT_PROVIDER_AUTH_SCHEME }}
         run: |
           set -euo pipefail
-          [[ -n "${REGISTRY}" ]] || {
-            echo "ACR_REGISTRY variable is not configured" >&2
-            exit 1
-          }
-          [[ -n "${KUBECONFIG_B64}" ]] || {
-            echo "KUBECONFIG_B64 secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${JWT_PRIVATE_KEY}" ]] || {
-            echo "JWT_PRIVATE_KEY production secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${PROVIDER_API_KEY}" ]] || {
-            echo "DEFAULT_PROVIDER_API_KEY production secret is not configured" >&2
-            exit 1
-          }
-          [[ -n "${PROVIDER_NAME}" ]] || {
-            echo "DEFAULT_PROVIDER_NAME production variable is not configured" >&2
-            exit 1
-          }
-          [[ -n "${PROVIDER_UPSTREAM_URL}" ]] || {
-            echo "DEFAULT_PROVIDER_UPSTREAM_URL production variable is not configured" >&2
-            exit 1
-          }
-          [[ -n "${PROVIDER_AUTH_HEADER}" ]] || {
-            echo "DEFAULT_PROVIDER_AUTH_HEADER production variable is not configured" >&2
-            exit 1
-          }
+          for name in REGISTRY KUBECONFIG_B64 JWT_PRIVATE_KEY PROVIDER_API_KEY \
+            PROVIDER_NAME PROVIDER_UPSTREAM_URL PROVIDER_AUTH_HEADER; do
+            if [[ -z "${!name}" ]]; then
+              echo "${name} is not configured" >&2
+              exit 1
+            fi
+          done
           if [[ "${PROVIDER_AUTH_HEADER,,}" == "x-api-key" &&
                 "${PROVIDER_AUTH_SCHEME}" != "__EMPTY__" ]]; then
             echo "DEFAULT_PROVIDER_AUTH_SCHEME must be __EMPTY__ for X-Api-Key" >&2

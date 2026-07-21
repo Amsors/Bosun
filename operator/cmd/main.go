@@ -26,6 +26,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -62,6 +63,7 @@ func main() {
 	var probeAddr string
 	var platformNamespace string
 	var agentImage string
+	var agentImagePullPolicy string
 	var workspaceStorageClass string
 	var gatewayURL string
 	var egressProxyURL string
@@ -79,6 +81,12 @@ func main() {
 		"The namespace containing Bosun platform service accounts and egress targets.",
 	)
 	flag.StringVar(&agentImage, "agent-image", "", "Immutable image reference for the main agent container.")
+	flag.StringVar(
+		&agentImagePullPolicy,
+		"agent-image-pull-policy",
+		string(corev1.PullIfNotPresent),
+		"Kubernetes image pull policy for agent containers.",
+	)
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "local-path", "StorageClass for P0 workspaces.")
 	flag.StringVar(
 		&gatewayURL,
@@ -112,6 +120,12 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	if agentImagePullPolicy != string(corev1.PullAlways) &&
+		agentImagePullPolicy != string(corev1.PullIfNotPresent) &&
+		agentImagePullPolicy != string(corev1.PullNever) {
+		setupLog.Error(nil, "Invalid agent image pull policy", "value", agentImagePullPolicy)
+		os.Exit(2)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -218,6 +232,7 @@ func main() {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		AgentImage:       agentImage,
+		AgentPullPolicy:  corev1.PullPolicy(agentImagePullPolicy),
 		StorageClassName: workspaceStorageClass,
 		GatewayURL:       gatewayURL,
 		EgressProxyURL:   egressProxyURL,

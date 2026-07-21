@@ -1,0 +1,4 @@
+.env
+.env.local
+deploy/local/*.secret
+deploy/local/*.secret.*

@@ -11,6 +11,7 @@ database:
 agent:
   storageClass: local-path
   idleScanInterval: 30s
+  imagePullPolicy: IfNotPresent
 
 api:
   terminal:

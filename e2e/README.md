@@ -12,3 +12,11 @@ BOSUN_E2E_PASSWORD='<test-only-password>' \
 ```
 
 `smoke-b.sh` 接收 smoke A 输出的 access token 创建 small session，等待进入 `Running` 后删除，并检查会话 Pod、PVC 与 CR 均已清理。
+
+本地 k3d 环境可直接运行：
+
+```bash
+BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke
+```
+
+该命令临时转发 frontend Service，以 smoke A 的输出自动调用 smoke B；本地 smoke 不替代发布前的真实跨区 k3s E2E。

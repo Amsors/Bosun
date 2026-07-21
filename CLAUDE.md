@@ -62,7 +62,19 @@ Bosun/
 
 ## 常用命令
 
-> 项目尚未初始化，各模块脚手架建好后更新本节。
+本地完整联调使用 Docker 中的 k3d 三角色集群；真实 provider 配置按 `deploy/local/README.md` 从 shell 环境变量注入：
+
+```bash
+make dev-up
+make dev-build COMPONENT=frontend
+make dev-deploy
+make dev-forward
+BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke
+make dev-reset
+make dev-down
+```
+
+模块自身的 lint/test/build 命令见各模块 README 或 Makefile；本地集群的依赖、Secret 注入与调度验证见 `deploy/local/README.md`。
 
 
 

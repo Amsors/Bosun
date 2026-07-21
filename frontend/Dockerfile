@@ -4,7 +4,8 @@ ARG NGINX_IMAGE=nginx:1.29.5-alpine3.23@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /src
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --include=optional \
+    && node --input-type=module -e "await import('rolldown')"
 COPY . .
 RUN npm run build
 
