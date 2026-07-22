@@ -1,5 +1,5 @@
 global:
-  registry: registry.cn-hangzhou.aliyuncs.com/amsors
+  registry: docker.io/amsors
   imageTag: "0000000"
   imagePullPolicy: IfNotPresent
 

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       git_sha:
-        description: Full commit SHA on main whose six images are already present in ACR
+        description: Full commit SHA on main whose six images are already present in Docker Hub
         required: true
         type: string
 
@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGISTRY: ${{ vars.ACR_REGISTRY }}
+  DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+  REGISTRY: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}
   CERT_MANAGER_VERSION: v1.21.0
   PUBLIC_HOST: bosun.amsors.com
 
@@ -64,7 +65,7 @@ jobs:
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
         run: |
           set -euo pipefail
-          for name in REGISTRY KUBECONFIG_B64 JWT_PRIVATE_KEY PROVIDER_API_KEY \
+          for name in DOCKERHUB_NAMESPACE KUBECONFIG_B64 JWT_PRIVATE_KEY PROVIDER_API_KEY \
             PROVIDER_NAME PROVIDER_UPSTREAM_URL PROVIDER_AUTH_HEADER ACME_EMAIL; do
             if [[ -z "${!name}" ]]; then
               echo "${name} is not configured" >&2
@@ -112,16 +113,26 @@ jobs:
           printf '%s' "${KUBECONFIG_B64}" | base64 --decode > "${kubeconfig}"
           export KUBECONFIG="${kubeconfig}"
 
+          edge_nodes="$(kubectl get nodes \
+            --selector role=edge \
+            --output jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+          edge_count="$(sed '/^$/d' <<< "${edge_nodes}" | wc --lines)"
+          if [[ "${edge_count}" -ne 1 ]]; then
+            echo "exactly one role=edge node is required; found ${edge_count}" >&2
+            exit 1
+          fi
+          edge_node="$(sed '/^$/d' <<< "${edge_nodes}")"
+
           unexpected_lb_nodes="$({
             kubectl get nodes \
               --selector svccontroller.k3s.cattle.io/enablelb=true \
               --output name || true
-          } | grep -v '^node/node-hk-dogyun-1c1g$' || true)"
+          } | grep -v "^node/${edge_node}$" || true)"
           if [[ -n "${unexpected_lb_nodes}" ]]; then
             echo "ServiceLB is enabled on unexpected nodes: ${unexpected_lb_nodes}" >&2
             exit 1
           fi
-          kubectl label node node-hk-dogyun-1c1g \
+          kubectl label node "${edge_node}" \
             svccontroller.k3s.cattle.io/enablelb=true \
             --overwrite
           kubectl apply --filename deploy/cluster/traefik-config.yaml

@@ -45,7 +45,7 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-        image: registry.cn-hangzhou.aliyuncs.com/amsors/operator:0000000
+        image: docker.io/amsors/operator:0000000
         name: manager
         ports:
         - containerPort: 8081

@@ -573,15 +573,7 @@ func agentAffinity() *corev1.Affinity {
 	return &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
 			NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{{
-				Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"core", "worker"},
-			}}}},
-		},
-		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
-			{Weight: 100, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
-				Key: "region", Operator: corev1.NodeSelectorOpIn, Values: []string{"sg"},
-			}}}},
-			{Weight: 50, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
-				Key: "region", Operator: corev1.NodeSelectorOpIn, Values: []string{"cn"},
+				Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"worker"},
 			}}}},
 		},
 	}}

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,12 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 		pod.Spec.Tolerations[0].TolerationSeconds == nil ||
 		*pod.Spec.Tolerations[0].TolerationSeconds != 300 {
 		t.Fatalf("tolerations = %#v", pod.Spec.Tolerations)
+	}
+	requiredAffinity := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	requirement := requiredAffinity.NodeSelectorTerms[0].MatchExpressions[0]
+	if requirement.Key != "role" || requirement.Operator != corev1.NodeSelectorOpIn ||
+		!reflect.DeepEqual(requirement.Values, []string{"worker"}) {
+		t.Fatalf("required node affinity = %#v, want role in [worker]", requirement)
 	}
 
 	version := pod.ResourceVersion
