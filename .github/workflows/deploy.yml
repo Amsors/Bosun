@@ -158,7 +158,7 @@ jobs:
             --set webhook.nodeSelector.role=core \
             --set cainjector.nodeSelector.role=core \
             --set startupapicheck.nodeSelector.role=core \
-            --atomic \
+            --rollback-on-failure \
             --wait \
             --timeout 10m
 
@@ -189,7 +189,7 @@ jobs:
             --set-string ingress.host="${PUBLIC_HOST}" \
             --set certManager.enabled=true \
             --set-string certManager.email="${ACME_EMAIL}" \
-            --atomic \
+            --rollback-on-failure \
             --wait \
             --timeout 15m
 
@@ -198,15 +198,21 @@ jobs:
             --for=condition=Ready \
             --timeout 10m
 
-          http_status="$(curl \
+          http_result="$(curl \
             --silent \
             --show-error \
             --output /dev/null \
-            --write-out '%{http_code}' \
+            --write-out '%{http_code} %{redirect_url}' \
             --max-time 20 \
             "http://${PUBLIC_HOST}/healthz")"
-          if [[ "${http_status}" != "308" ]]; then
-            echo "HTTP endpoint returned ${http_status}; expected permanent HTTPS redirect (308)" >&2
+          http_status="${http_result%% *}"
+          redirect_url="${http_result#* }"
+          if [[ "${http_status}" != "301" && "${http_status}" != "308" ]]; then
+            echo "HTTP endpoint returned ${http_status}; expected permanent HTTPS redirect (301 or 308)" >&2
+            exit 1
+          fi
+          if [[ "${redirect_url}" != "https://${PUBLIC_HOST}/healthz" ]]; then
+            echo "HTTP endpoint redirected to an unexpected URL" >&2
             exit 1
           fi
           curl \

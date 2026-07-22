@@ -84,6 +84,56 @@ tailscale ip -4
 tailscale status
 ```
 
+### 为 k3s 配置专用 resolver
+
+Ubuntu 的 DHCP 或 Tailscale 可能向节点 `/etc/resolv.conf` 注入 `localdomain` 和
+MagicDNS search domain。kubelet 默认会把它们追加到 Pod 的 DNS search 列表，而
+Kubernetes 默认的 `ndots:5` 会使 Go resolver 先尝试
+`api.deepseek.com.localdomain` 之类的扩展名。如果上游 DNS 对 `*.localdomain`
+返回了错误地址，cert-manager 和 gateway 会连接到错误主机。
+
+在三台节点上都创建无 search domain 的专用 resolver 文件：
+
+```bash
+sudo install -d -m 0755 /etc/rancher/k3s
+printf '%s\n' \
+  'nameserver 1.1.1.1' \
+  'nameserver 8.8.8.8' |
+  sudo tee /etc/rancher/k3s/resolv.conf >/dev/null
+```
+
+如果节点无法访问上述公共 DNS，将它们替换为当前网络可达且不会对
+`*.localdomain` 做通配解析的 resolver。不要在该文件中添加 `search`
+或 `domain` 行。
+
+在三台节点的 `/etc/rancher/k3s/config.yaml` 中都加入以下配置；文件已存在时必须保留其他字段，不要整个覆盖：
+
+```yaml
+resolv-conf: /etc/rancher/k3s/resolv.conf
+```
+
+从零安装时，后续 k3s server/agent 服务会在首次启动时读取该配置。
+如果是给已运行的集群补配，在香港 worker 和 edge 分别执行：
+
+```bash
+sudo systemctl restart k3s-agent
+```
+
+在新加坡 control plane 执行：
+
+```bash
+sudo systemctl restart k3s
+```
+
+已存在的 Pod 不会自动重建 DNS sandbox。补配完成且三个节点恢复
+`Ready` 后，重建 CoreDNS、cert-manager 和 Bosun Deployment：
+
+```bash
+kubectl rollout restart deployment/coredns -n kube-system
+kubectl rollout restart deployment/cert-manager -n cert-manager
+kubectl rollout restart deployment -n bosun-platform
+```
+
 使用了自定义 Tailscale ACL 时，要允许三个节点之间的流量。主机开启 UFW 时，可用下列简化规则允许 tailnet 入站：
 
 ```bash
@@ -185,6 +235,17 @@ sudo k3s kubectl get nodes \
 
 期望只有三个 `Ready` 节点，且它们的 `INTERNAL-IP` 是 Tailscale IP。
 
+部署出 frontend 后，确认 Pod 已使用新 resolver。`search` 行中不应再出现
+`localdomain` 或 Tailscale MagicDNS domain，外部域名也不应解析成
+`*.localdomain`：
+
+```bash
+kubectl exec -n bosun-platform deployment/bosun-frontend -- \
+  cat /etc/resolv.conf
+kubectl exec -n bosun-platform deployment/bosun-frontend -- \
+  getent ahostsv4 api.deepseek.com
+```
+
 ## 5. 准备 DNS、Docker Hub 和 GitHub
 
 1. 将 `bosun.amsors.com` 的 A 记录指向 `node-hk-edge` 的公网 IPv4。不要把 DNS 指向 Tailscale IP。
@@ -283,9 +344,9 @@ curl -fsS https://bosun.amsors.com/healthz
 - PostgreSQL、API、gateway、operator 和 cert-manager 在 core；
 - 新建 `AgentSession` 的 Pod 只在 `node-hk-worker`；
 - Certificate 为 `Ready=True`；
-- HTTP 返回 `308`，HTTPS `/healthz` 返回成功。
+- HTTP 返回指向对应 HTTPS URL 的永久重定向（`301` 或 `308`），HTTPS `/healthz` 返回成功。
 
-如果节点加入失败，先检查 `tailscale ping <peer>`、control plane 的 `6443/tcp` 可达性以及 `journalctl -u k3s-agent`。如果 Pod 跨节点不通，检查 k3s Node `INTERNAL-IP` 是否为 Tailscale IP、`tailscale0` 是否存在，以及主机防火墙是否允许 Tailscale 内部流量。
+如果节点加入失败，先检查 `tailscale ping <peer>`、control plane 的 `6443/tcp` 可达性以及 `journalctl -u k3s-agent`。如果 Pod 跨节点不通，检查 k3s Node `INTERNAL-IP` 是否为 Tailscale IP、`tailscale0` 是否存在，以及主机防火墙是否允许 Tailscale 内部流量。如果 cert-manager 报外部 HTTPS 证书过期，但节点上直接 `curl` 正常，检查 Pod `/etc/resolv.conf` 是否再次出现 `localdomain`，以及 `getent` 是否返回了 `<external-host>.localdomain`。
 
 ## 参考
 
