@@ -2,3 +2,4 @@
 .env.local
 deploy/local/*.secret
 deploy/local/*.secret.*
+tmp_kubeconfig

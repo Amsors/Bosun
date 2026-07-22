@@ -49,3 +49,8 @@ make dev-down
 - 提交信息用 Conventional Commits；Commmit Message使用英文编写。
 - 任何密钥、token、kubeconfig 一律不得写入仓库。
 - 文档一律中文，技术名词保留英文。
+
+
+## agent 调试指南
+
+如果需要实际连接到集群进行调试，请使用项目根目录下的 `tmp_kubeconfig` 文件作为临时 kubeconfig 文件，请在命令中引用其路径，但不要直接读取这个文件，调试后也不需要删除这个文件，此文件由用户管理
