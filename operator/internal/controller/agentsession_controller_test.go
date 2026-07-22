@@ -173,6 +173,41 @@ func TestAgentSessionIdleHibernationRetainsPVCAndResumeReusesIt(t *testing.T) {
 	}
 }
 
+func TestAgentSessionExplicitHibernateRemainsStable(t *testing.T) {
+	ctx := context.Background()
+	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012409", "018f9c6e-1234-7000-8000-abcdef012509")
+	reconciler := newAgentSessionReconciler()
+	reconcileAgentSession(t, reconciler, session, 4)
+
+	var pod corev1.Pod
+	getObject(t, namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)), &pod)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	if err := testClient.Status().Update(ctx, &pod); err != nil {
+		t.Fatalf("set test Pod ready: %v", err)
+	}
+	reconcileAgentSession(t, reconciler, session, 1)
+
+	var current bosunv1alpha1.AgentSession
+	getObject(t, clientKey(session), &current)
+	if current.Status.Phase != bosunv1alpha1.AgentSessionPhaseRunning {
+		t.Fatalf("phase before hibernation = %q, want Running", current.Status.Phase)
+	}
+	current.Spec.DesiredState = bosunv1alpha1.DesiredStateHibernated
+	if err := testClient.Update(ctx, &current); err != nil {
+		t.Fatalf("request hibernation: %v", err)
+	}
+
+	reconcileAgentSession(t, reconciler, session, 3)
+	for i := range 3 {
+		getObject(t, clientKey(session), &current)
+		if current.Status.Phase != bosunv1alpha1.AgentSessionPhaseHibernated {
+			t.Fatalf("phase after hibernation reconcile #%d = %q, want Hibernated", i+1, current.Status.Phase)
+		}
+		reconcileAgentSession(t, reconciler, session, 1)
+	}
+}
+
 func TestAgentSessionMissingHibernatedPVCFailsWithoutCreatingEmptyWorkspace(t *testing.T) {
 	ctx := context.Background()
 	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012403", "018f9c6e-1234-7000-8000-abcdef012503")

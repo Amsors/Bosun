@@ -105,6 +105,12 @@ func (r *AgentSessionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	switch {
+	case session.Spec.DesiredState == bosunv1alpha1.DesiredStateHibernated &&
+		session.Status.Phase == bosunv1alpha1.AgentSessionPhaseHibernated:
+		// The desired state has already been reached. Keep Hibernated stable
+		// instead of starting the hibernation transition again on every
+		// reconcile triggered by the status update.
+		return ctrl.Result{}, nil
 	case session.Spec.DesiredState == bosunv1alpha1.DesiredStateHibernated:
 		return r.reconcileHibernate(ctx, &session)
 	case session.Status.Phase == bosunv1alpha1.AgentSessionPhaseHibernating:
