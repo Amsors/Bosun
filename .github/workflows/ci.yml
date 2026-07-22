@@ -59,8 +59,6 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.2
@@ -83,8 +81,6 @@ jobs:
         working-directory: operator
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.2
@@ -105,8 +101,6 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-node@v5
         with:
           node-version: 24.14.0
@@ -142,8 +136,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.2
@@ -157,7 +149,7 @@ jobs:
           GOBIN="${RUNNER_TEMP}" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           "${RUNNER_TEMP}/actionlint"
       - name: Reject latest tags, likely secrets, and stale generated manifests
-        run: ./deploy/scripts/validate-m0.sh
+        run: ./deploy/scripts/validate-delivery.sh
       - name: Check delivery shell scripts
         run: shellcheck -x -P e2e deploy/scripts/*.sh e2e/*.sh
 

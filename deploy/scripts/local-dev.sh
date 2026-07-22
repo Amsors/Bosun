@@ -106,7 +106,7 @@ create_cluster() {
   ensure_local_context
   kubectl wait --for=condition=Ready nodes --all --timeout=180s
   kubectl label node "k3d-${cluster_name}-server-0" region=sg role=core --overwrite
-  kubectl label node "k3d-${cluster_name}-agent-0" region=cn role=worker --overwrite
+  kubectl label node "k3d-${cluster_name}-agent-0" region=hk role=worker --overwrite
   kubectl label node "k3d-${cluster_name}-agent-1" region=hk role=edge --overwrite
   kubectl taint node "k3d-${cluster_name}-agent-1" bosun.io/edge=true:NoSchedule --overwrite
 }

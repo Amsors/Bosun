@@ -6,4 +6,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: userenvironment-sample
 spec:
-  # TODO(user): Add fields here
+  userID: 018f1f22-7c20-7a32-8f4a-9d8b6c5e4a31
+  namespace: bosun-u-018f1f22
+  quotaProfile: mvp

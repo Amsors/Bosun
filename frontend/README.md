@@ -1,5 +1,31 @@
-# Vue 3 + TypeScript + Vite
+# Bosun frontend
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+frontend 是基于 Vue 3、Vite 和 TypeScript 的单页应用，提供注册登录、AgentSession 管理和 WebSocket 终端。生产镜像由 Nginx 提供静态文件，并将 `/api/` 转发到 backend API。
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## 模块检查
+
+```bash
+npm ci
+npm run lint
+npm run format:check
+npm test
+npm run build
+```
+
+`npm run dev` 只启动 Vite 开发服务器，仓库没有为它配置独立的 backend proxy。需要完整 API、WebSocket 和 Kubernetes 联调时，应在仓库根目录使用本地 k3d 环境：
+
+```bash
+make dev-up
+make dev-build COMPONENT=frontend
+make dev-forward
+```
+
+随后访问 `http://localhost:18080`。完整的环境变量、重建和 smoke test 说明见 `deploy/local/README.md`。
+
+## 目录说明
+
+- `src/views/`：登录、注册、会话列表、创建与详情页面；
+- `src/api/`：REST API contract 和 client；
+- `src/stores/`：认证与会话状态；
+- `src/components/terminal-panel.vue`：浏览器终端与重连逻辑；
+- `nginx.conf`：生产静态文件、API 和 WebSocket 反向代理配置。

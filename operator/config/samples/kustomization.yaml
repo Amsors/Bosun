@@ -1,5 +1,4 @@
 ## Append samples of your project ##
 resources:
 - bosun_v1alpha1_userenvironment.yaml
-- bosun_v1alpha1_agentsession.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

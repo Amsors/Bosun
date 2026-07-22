@@ -6,11 +6,11 @@
 
 本机需要 Docker、k3d、kubectl、Helm 4、OpenSSL、Git 和 Bash。运行 smoke 还需要 curl、jq、uuidgen 与 sha256sum。
 
-**安装k3d：**
+**安装 k3d：**
 
 https://k3d.io
 
-**安装helm：**
+**安装 Helm：**
 
 https://helm.sh/zh/docs/intro/install/
 
@@ -27,9 +27,9 @@ export BOSUN_DEV_PROVIDER_AUTH_SCHEME=""
 make dev-up
 ```
 
-上方`make dev-up`命令初次执行时间可能比较长，耐心等待即可。
+上方 `make dev-up` 命令初次执行需要拉取基础镜像，耗时会相对较长。
 
-执行完以上命令后，执行一下 `make dev-forward`，之后在浏览器里访问`localhost:18080`，就可以看到网站页面了
+完成后执行 `make dev-forward`，再在浏览器访问 `http://localhost:18080`。
 
 
 ## 日常命令
@@ -59,16 +59,14 @@ make dev-down
 
 本地镜像 tag 默认取当前 commit 的七位 SHA，可用 `BOSUN_DEV_IMAGE_TAG`（须为七位小写十六进制）覆盖；Registry 端口可用 `BOSUN_DEV_REGISTRY_PORT`（默认 5001）调整。API key、JWT 私钥与数据库口令只写入临时目录和本地 k8s Secret。
 
-**修改某些代码后，只需执行一下make build xxx(修改的模块)，就可以自动重新建立集群，相应代码更改会自动生效。但端口转发会断掉，需要重新转发一下(make dev-forward)**
-
 ## 调度验证
 
-正常创建的 agent session 首选 `core`。验证 worker fallback 时先执行：
+正常创建的 AgentSession 必须调度到 `role=worker`，不会使用 core 或带 taint 的 edge。创建测试会话后执行：
 
 ```bash
-kubectl cordon k3d-bosun-server-0
-# 创建并检查新 session
-kubectl uncordon k3d-bosun-server-0
+kubectl get pods -A \
+  -l bosun.io/session \
+  -o wide
 ```
 
-新 session 应落在 `k3d-bosun-agent-0`（`worker/region=cn`），不得落在带 `bosun.io/edge=true:NoSchedule` taint 的 edge 节点。
+新 session 应落在 `k3d-bosun-agent-0`（`role=worker`、`region=hk`），不得落在 `k3d-bosun-server-0` 或带 `bosun.io/edge=true:NoSchedule` taint 的 edge 节点。

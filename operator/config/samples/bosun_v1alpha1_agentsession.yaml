@@ -5,5 +5,17 @@ metadata:
     app.kubernetes.io/name: operator
     app.kubernetes.io/managed-by: kustomize
   name: agentsession-sample
+  namespace: bosun-u-018f1f22
 spec:
-  # TODO(user): Add fields here
+  sessionID: 018f1f23-0000-7abc-8abc-1234567890ab
+  userID: 018f1f22-7c20-7a32-8f4a-9d8b6c5e4a31
+  desiredState: Running
+  resumeNonce: 018f1f24-0000-7abc-8abc-1234567890ab
+  tier: small
+  runtime: claude-code
+  provider:
+    mode: platform
+  storagePolicy: local
+  idleTimeoutSeconds: 1800
+  activeDeadlineSeconds: 28800
+  priorityClassName: bosun-free

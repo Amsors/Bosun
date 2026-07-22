@@ -1,4 +1,4 @@
-# Bosun P0 E2E
+# Bosun E2E
 
 本目录保存跨 backend、operator、frontend 与 deploy 的真实 k3s 验收脚本。
 

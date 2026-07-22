@@ -9,7 +9,7 @@ if rg --glob='*.yaml' --glob='Dockerfile' 'image:.*:latest|FROM .*:latest' "${ro
 fi
 
 if rg --hidden --glob='!**/.git/**' --glob='!**/node_modules/**' \
-  --glob='!deploy/scripts/validate-m0.sh' \
+  --glob='!deploy/scripts/validate-delivery.sh' \
   '(sk-ant-[A-Za-z0-9_-]{16,}|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|kubeconfig:)' "${root}"; then
   echo "likely secret material found" >&2
   exit 1

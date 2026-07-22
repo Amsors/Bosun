@@ -23,10 +23,10 @@ kubectl config current-context
 kubectl get nodes -o wide
 ```
 
-若旧 server 仍可访问，先删除旧 agent 的 Node 对象。本项目允许数据丢失，不需要 drain 或等待 Pod 迁移：
+若旧 server 仍可访问，先删除两个 agent 的 Node 对象。本项目允许数据丢失，不需要 drain 或等待 Pod 迁移：
 
 ```bash
-kubectl delete node node-cn-aliyun-2c2g node-cn-tencent-2c2g node-hk-dogyun-1c1g
+kubectl delete node node-hk-worker node-hk-edge
 ```
 
 在每台旧 agent 上执行：
@@ -43,12 +43,7 @@ sudo /usr/local/bin/k3s-uninstall.sh
 
 卸载 server 会删除本地集群数据、kubeconfig 和 k3s 工具。如果某台旧主机已经不可访问，只删除它的 Node 对象即可；整个旧 server 随后也会被销毁。
 
-在 Tailscale Admin Console 中移除不再使用的旧设备。若重用主机，检查 `/etc/rancher/k3s/registries.yaml`；如果卸载后它仍存在，将其改名保留备份，不再让 k3s 读取阿里云 mirror：
-
-```bash
-sudo mv /etc/rancher/k3s/registries.yaml \
-  /etc/rancher/k3s/registries.yaml.disabled
-```
+在 Tailscale Admin Console 中移除不再使用的旧设备。Bosun 业务镜像直接使用 Docker Hub，节点不需要 `/etc/rancher/k3s/registries.yaml`；重用装过其他集群的主机时，应先确认没有遗留的自定义 registry 配置。
 
 ## 2. 准备三台新主机
 
@@ -250,11 +245,10 @@ kubectl exec -n bosun-platform deployment/bosun-frontend -- \
 
 1. 将 `bosun.amsors.com` 的 A 记录指向 `node-hk-edge` 的公网 IPv4。不要把 DNS 指向 Tailscale IP。
 2. 在 Docker Hub 准备 `backend-api`、`gateway`、`operator`、`frontend`、`agent`、`egress-proxy` 六个公开 repository。公开 repository 让 k3s 节点不需要 registry credential。
-3. 删除 GitHub 中旧的 `ACR_REGISTRY`、`ACR_USERNAME` 和 `ACR_PASSWORD`。
-4. 创建 Repository Variable `DOCKERHUB_NAMESPACE`，值为 Docker Hub 用户名或 organization。
-5. 在 `registry` Environment 创建 `DOCKERHUB_USERNAME` 和只有 push 权限的 `DOCKERHUB_TOKEN` Secret。
-6. 在 Repository Variables 中配置 `ACME_EMAIL`、`DEFAULT_PROVIDER_NAME`、`DEFAULT_PROVIDER_UPSTREAM_URL`、`DEFAULT_PROVIDER_AUTH_HEADER` 和 `DEFAULT_PROVIDER_AUTH_SCHEME`。使用 `x-api-key` 时，`DEFAULT_PROVIDER_AUTH_SCHEME` 必须是字面值 `__EMPTY__`。
-7. 在 `production` Environment 创建 `DEFAULT_PROVIDER_API_KEY`、`JWT_PRIVATE_KEY` 和 `KUBECONFIG_B64` Secret。
+3. 创建 Repository Variable `DOCKERHUB_NAMESPACE`，值为 Docker Hub 用户名或 organization。
+4. 在 `registry` Environment 创建 `DOCKERHUB_USERNAME` 和只有 push 权限的 `DOCKERHUB_TOKEN` Secret。
+5. 在 Repository Variables 中配置 `ACME_EMAIL`、`DEFAULT_PROVIDER_NAME`、`DEFAULT_PROVIDER_UPSTREAM_URL`、`DEFAULT_PROVIDER_AUTH_HEADER` 和 `DEFAULT_PROVIDER_AUTH_SCHEME`。使用 `x-api-key` 时，`DEFAULT_PROVIDER_AUTH_SCHEME` 必须是字面值 `__EMPTY__`。
+6. 在 `production` Environment 创建 `DEFAULT_PROVIDER_API_KEY`、`JWT_PRIVATE_KEY` 和 `KUBECONFIG_B64` Secret。
 
 首次可以在临时目录生成 JWT key 和可远程访问的 kubeconfig：
 
@@ -301,7 +295,7 @@ sudo k3s kubectl -n bosun-platform create secret generic bosun-database \
 unset DATABASE_PASSWORD
 ```
 
-确认 Secret 存在后删除临时目录。`deploy/cluster/bootstrap.yaml` 现在仅作 RBAC 基线参考和单独验证使用；生产 Helm chart 已管理同名资源，首次 Helm 部署前不要再手工 `kubectl apply bootstrap.yaml`，否则 Helm 会因无法接管已存在资源而失败。
+确认 Secret 存在后删除临时目录。其余 namespace、CRD、RBAC 与 workload 均由生产 Helm chart 创建，不需要预先手工应用清单。
 
 ## 7. 首次发布与部署
 
@@ -319,7 +313,7 @@ workflow 会完成以下初始化：
 - 安装 CRD、RBAC、PostgreSQL 与全部 Bosun workload；
 - 申请 Let's Encrypt 证书并验证 HTTP 到 HTTPS 跳转。
 
-Bosun 自建的六个镜像只从 Docker Hub 推拉，不再使用 ACR 或阿里云 mirror。k3s 内置系统组件和 cert-manager 仍使用它们的官方上游 registry；其中 cert-manager 的官方 chart 和镜像位于 Quay。为了只使用 Docker Hub 而自行镜像这些第三方组件会增加不必要的供应链维护，本项目不采用该方案。
+Bosun 自建的六个镜像只从 Docker Hub 推拉，不配置 registry mirror。k3s 内置系统组件和 cert-manager 仍使用它们的官方上游 registry；其中 cert-manager 的官方 chart 和镜像位于 Quay。为了让第三方组件也只经过 Docker Hub 而自行维护镜像副本会增加不必要的供应链成本，本项目不采用该方案。
 
 ## 8. 最终验收
 

@@ -1,135 +1,39 @@
-# operator
-// TODO(user): Add simple overview of use/purpose
+# Bosun operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+operator 使用 kubebuilder 和 controller-runtime 管理两个 CRD：
 
-## Getting Started
+- `UserEnvironment`：创建用户 namespace、配额、默认资源限制、NetworkPolicy 和 backend RBAC；
+- `AgentSession`：创建并维护 workspace PVC、ServiceAccount 和隔离的 coding agent Pod，处理休眠、恢复、超时与删除。
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+Agent Pod 必须调度到 `role=worker` 节点。平台 namespace、Agent 镜像、gateway、egress proxy 和 storage class 由启动参数注入；生产参数由根目录 Helm chart 管理。
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+## 开发命令
 
-```sh
-make docker-build docker-push IMG=<some-registry>/operator:tag
+```bash
+make test
+make lint
+make build
+make manifests generate
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+修改 `api/v1alpha1/*_types.go` 或 kubebuilder RBAC marker 后，必须运行 `make manifests generate`，并提交生成的 CRD、RBAC 和 DeepCopy 结果。根目录 CI 会检查这些生成文件是否同步。
 
-**Install the CRDs into the cluster:**
+## CR 示例
 
-```sh
-make install
+先安装 CRD 并运行 operator，再创建用户环境：
+
+```bash
+kubectl apply -f config/samples/bosun_v1alpha1_userenvironment.yaml
+kubectl wait userenvironment/userenvironment-sample \
+  --for=jsonpath='{.status.phase}'=Ready \
+  --timeout=2m
+kubectl apply -f config/samples/bosun_v1alpha1_agentsession.yaml
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+AgentSession 示例位于 operator 创建的用户 namespace 中，因此不能在 UserEnvironment 变为 `Ready` 前应用。
 
-```sh
-make deploy IMG=<some-registry>/operator:tag
-```
+## 部署方式
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+生产环境只使用根目录 `deploy/chart` 和 `.github/workflows/deploy.yml`，不要单独运行 `make deploy` 覆盖生产 release。operator Makefile 中的 `make install`、`make deploy`、`make undeploy` 和 `make test-e2e` 保留给隔离的开发或 Kind 集群使用。
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
-## License
-
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+本地完整联调请在仓库根目录执行 `make dev-up` 和 `make dev-smoke`，详细说明见 `deploy/local/README.md`。
