@@ -253,6 +253,43 @@ func TestLoginSuccessAndFailures(t *testing.T) {
 	}
 }
 
+func TestLoginBootstrapsMissingAdminWithoutReplacingExistingPassword(t *testing.T) {
+	store := newFakeStore()
+	env := &fakeEnv{}
+	svc := newTestService(t, store, env, fixedClock(time.Unix(1_700_000_000, 0)))
+	ctx := context.Background()
+
+	if _, err := svc.Login(ctx, " admin ", "short"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("short bootstrap password error = %v, want ErrInvalidCredentials", err)
+	}
+	if _, err := store.GetUserByEmail(ctx, bootstrapAdmin); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("admin created with invalid password, lookup error = %v", err)
+	}
+
+	tok, err := svc.Login(ctx, "Admin", "correcthorse")
+	if err != nil {
+		t.Fatalf("first admin Login() error = %v", err)
+	}
+	if tok.User.Email != bootstrapAdmin || tok.AccessToken == "" || tok.RefreshToken == "" {
+		t.Fatalf("first admin Login() returned incomplete result: %+v", tok)
+	}
+	if !env.ensured[tok.User.ID.String()] {
+		t.Fatal("admin environment was not ensured during bootstrap")
+	}
+
+	if _, err := svc.Login(ctx, bootstrapAdmin, "wrongpassword"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("existing admin wrong password error = %v, want ErrInvalidCredentials", err)
+	}
+	if _, err := svc.Login(ctx, bootstrapAdmin, "correcthorse"); err != nil {
+		t.Fatalf("existing admin password was replaced: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.usersByID) != 1 {
+		t.Fatalf("admin user count = %d, want 1", len(store.usersByID))
+	}
+}
+
 func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	store := newFakeStore()
 	svc := newTestService(t, store, &fakeEnv{}, fixedClock(time.Unix(1_700_000_000, 0)))

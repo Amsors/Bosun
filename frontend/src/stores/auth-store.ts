@@ -9,8 +9,8 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const authenticated = computed(() => accessToken.value !== null)
 
-  async function login(email: string, password: string): Promise<void> {
-    const data = await authApi.login(email, password)
+  async function login(identifier: string, password: string): Promise<void> {
+    const data = await authApi.login(identifier, password)
     accessToken.value = data.accessToken
     user.value = data.user
   }

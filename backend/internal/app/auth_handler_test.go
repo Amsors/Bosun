@@ -388,6 +388,24 @@ func TestLoginMeRefreshLogoutFlow(t *testing.T) {
 	}
 }
 
+func TestLoginBootstrapsAdmin(t *testing.T) {
+	router := newTestAPI(t, 100)
+	login := doJSON(t, router, http.MethodPost, "/api/v1/auth/login", `{"email":"admin","password":"correcthorse"}`, nil)
+	if login.Code != http.StatusOK {
+		t.Fatalf("admin login status = %d body=%s", login.Code, login.Body.String())
+	}
+	data := decodeEnvelope(t, login)["data"].(map[string]any)
+	user := data["user"].(map[string]any)
+	if user["email"] != "admin" || data["accessToken"] == "" {
+		t.Fatalf("admin login data = %v", data)
+	}
+
+	wrongPassword := doJSON(t, router, http.MethodPost, "/api/v1/auth/login", `{"email":"admin","password":"wrongpassword"}`, nil)
+	if wrongPassword.Code != http.StatusUnauthorized {
+		t.Fatalf("existing admin wrong-password status = %d body=%s", wrongPassword.Code, wrongPassword.Body.String())
+	}
+}
+
 func TestLoginRateLimited(t *testing.T) {
 	router := newTestAPI(t, 2)
 	doJSON(t, router, http.MethodPost, "/api/v1/auth/register",

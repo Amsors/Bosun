@@ -123,6 +123,27 @@ image_name() {
   esac
 }
 
+remove_component_images() {
+  local component="$1"
+  local name
+  local repository
+  local images=()
+  name="$(image_name "${component}")"
+  repository="${host_registry}/${name}"
+
+  mapfile -t images < <(
+    docker image ls \
+      --filter "reference=${repository}:*" \
+      --format '{{.Repository}}:{{.Tag}}'
+  )
+  if [[ ${#images[@]} -eq 0 ]]; then
+    return
+  fi
+
+  echo "removing previous ${component} images: ${images[*]}"
+  docker image rm "${images[@]}"
+}
+
 build_component() {
   local component="$1"
   local name
@@ -130,6 +151,8 @@ build_component() {
   name="$(image_name "${component}")"
   tag="$(image_tag)"
   local image="${host_registry}/${name}:${tag}"
+
+  remove_component_images "${component}"
 
   case "${component}" in
     api | gateway)
@@ -269,7 +292,23 @@ deploy_chart() {
 forward_frontend() {
   ensure_local_context
   echo "Bosun is available at http://127.0.0.1:18080; press Ctrl-C to stop forwarding"
-  kubectl --namespace "${platform_namespace}" port-forward service/bosun-frontend 18080:8080
+  trap 'echo "port-forward stopped by user"; exit 130' INT TERM
+
+  local retry_count=0
+  local exit_code
+  while true; do
+    if [[ ${retry_count} -gt 0 ]]; then
+      echo "starting port-forward retry #${retry_count}" >&2
+    fi
+    if kubectl --namespace "${platform_namespace}" port-forward service/bosun-frontend 18080:8080; then
+      exit_code=0
+    else
+      exit_code=$?
+    fi
+    retry_count=$((retry_count + 1))
+    echo "port-forward exited with code ${exit_code}; retry #${retry_count} in 2s" >&2
+    sleep 2
+  done
 }
 
 run_smoke() (

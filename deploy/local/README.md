@@ -45,14 +45,16 @@ make dev-reset
 make dev-down
 ```
 
+数据库清空或集群重建后，可直接在登录页使用用户名 `admin` 和至少 8 个字符的密码登录。若 `admin` 尚不存在，首次登录会自动创建该用户；已存在时不会重置密码。
+
 下表逐条说明行为与前置。所有命令在执行部署或破坏性动作前，都会校验 `kubectl` 当前 context 为 `k3d-bosun`，否则直接拒绝，避免误操作其他集群。
 
 | 命令 | 行为 | 前置与参数 |
 |---|---|---|
 | `make dev-up` | 首次拉起环境：创建集群 → 构建全部镜像 → 部署 chart。幂等，集群或 Registry 已存在则复用。 | 需注入 provider 环境变量（见「启动」）。 |
-| `make dev-build [COMPONENT=<名>]` | 重新构建并推送镜像后滚动重启对应 Deployment。`COMPONENT` 取 `api`、`gateway`、`operator`、`frontend`、`agent`、`egress-proxy`、`all`，缺省 `all`。 | 集群须已存在。`COMPONENT=all` 会顺带重新部署 chart 并重启全部 Deployment，因此需 provider 环境变量；单组件构建不需要。改 `agent` 镜像不替换存量 Pod，需新建测试 session 才生效。 |
+| `make dev-build [COMPONENT=<名>]` | 先删除宿主机 Docker 中对应组件的旧版本镜像，再重新构建、推送并滚动重启对应 Deployment。`COMPONENT` 取 `api`、`gateway`、`operator`、`frontend`、`agent`、`egress-proxy`、`all`，缺省 `all`。 | 集群须已存在。`COMPONENT=all` 会逐个清理并构建所有组件，同时重新部署 chart 并重启全部 Deployment，因此需 provider 环境变量；单组件构建不需要。改 `agent` 镜像不替换存量 Pod，需新建测试 session 才生效。 |
 | `make dev-deploy` | 用当前镜像 tag 重新 `helm upgrade` 并重启 gateway，不重新构建镜像。 | 集群须已存在，需 provider 环境变量。适用于只改了 chart/values 或想重新注入 provider 配置的场景。 |
-| `make dev-forward` | 前台把 `http://127.0.0.1:18080` 转发到 frontend Service，`Ctrl-C` 结束；frontend 容器继续经集群 Service 代理 `/api/`。 | 集群须运行中。 |
+| `make dev-forward` | 前台把 `http://127.0.0.1:18080` 转发到 frontend Service，转发因集群重建等原因退出时每 2 秒自动重试并打印重试次数，`Ctrl-C` 结束；frontend 容器继续经集群 Service 代理 `/api/`。 | 启动时集群须运行中。 |
 | `make dev-smoke` | 临时转发 frontend 并依次运行 smoke A/B（注册登录 → 创建 session → 等待 `Running` → 删除并校验 Pod、PVC、CR 清理），结束后自动收回转发。 | 需 `BOSUN_E2E_PASSWORD`，即 `BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke`。 |
 | `make dev-reset` | 删除并重建名为 `bosun` 的集群后重新部署，保留 Registry 镜像缓存。 | 需 provider 环境变量。用于集群状态脏了又想省去重新拉镜像。 |
 | `make dev-down` | 删除 `bosun` 集群与本地 Registry，回到干净状态。 | 破坏性，不需要 provider 环境变量。 |

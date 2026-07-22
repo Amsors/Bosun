@@ -28,6 +28,8 @@ var (
 	ErrValidation = errors.New("validation failed")
 )
 
+const bootstrapAdmin = "admin"
+
 // User 是认证域的用户实体。
 type User struct {
 	ID           uuid.UUID
@@ -162,6 +164,10 @@ func (s *Service) Register(ctx context.Context, email, password string) (*Regist
 	if err != nil {
 		return nil, err
 	}
+	return s.createUser(ctx, email, password)
+}
+
+func (s *Service) createUser(ctx context.Context, email, password string) (*RegisterResult, error) {
 	if err := validatePassword(password); err != nil {
 		return nil, err
 	}
@@ -178,27 +184,46 @@ func (s *Service) Register(ctx context.Context, email, password string) (*Regist
 		return nil, err // 含 ErrEmailTaken，由 handler 映射
 	}
 
-	// 事务已提交，CR 创建为尽力而为；失败由修复循环补建，不阻塞注册成功。
+	// 事务已提交，CR 创建为尽力而为；失败由修复循环补建，不阻塞用户创建成功。
 	phase := "Pending"
 	if err := s.env.Ensure(ctx, user.ID.String()); err != nil {
-		s.logger.Error("ensure user environment after register failed", "reason", err, "user_id", user.ID.String())
+		s.logger.Error("ensure user environment after user creation failed", "reason", err, "user_id", user.ID.String())
 	}
 	return &RegisterResult{User: user, EnvironmentPhase: phase}, nil
 }
 
 // Login 校验凭据、必要时渐进 rehash，并签发 access token 与新 refresh token family。
+// 特殊登录名 admin 在不存在时会使用本次密码自动创建，便于本地数据库重建后快速调试。
 func (s *Service) Login(ctx context.Context, email, password string) (*TokenResult, error) {
-	normalized, err := normalizeEmail(email)
+	normalized, err := normalizeLoginIdentifier(email)
 	if err != nil {
 		return nil, ErrInvalidCredentials
 	}
 	user, err := s.store.GetUserByEmail(ctx, normalized)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			_, _ = VerifyPassword(password, s.dummyHash) // 恒定时间兜底
-			return nil, ErrInvalidCredentials
+			if normalized != bootstrapAdmin {
+				_, _ = VerifyPassword(password, s.dummyHash) // 恒定时间兜底
+				return nil, ErrInvalidCredentials
+			}
+			created, createErr := s.createUser(ctx, bootstrapAdmin, password)
+			switch {
+			case createErr == nil:
+				user = created.User
+			case errors.Is(createErr, ErrEmailTaken):
+				// 并发首次登录时另一个请求可能刚完成创建；读取胜出的账号并继续校验密码。
+				user, err = s.store.GetUserByEmail(ctx, bootstrapAdmin)
+				if err != nil {
+					return nil, fmt.Errorf("lookup concurrently bootstrapped admin: %w", err)
+				}
+			case errors.Is(createErr, ErrValidation):
+				return nil, ErrInvalidCredentials
+			default:
+				return nil, fmt.Errorf("bootstrap admin: %w", createErr)
+			}
+		} else {
+			return nil, fmt.Errorf("lookup user: %w", err)
 		}
-		return nil, fmt.Errorf("lookup user: %w", err)
 	}
 	if user.DisabledAt != nil {
 		return nil, ErrInvalidCredentials
@@ -366,6 +391,14 @@ func normalizeEmail(email string) (string, error) {
 		return "", fmt.Errorf("%w: email format", ErrValidation)
 	}
 	return strings.ToLower(trimmed), nil
+}
+
+func normalizeLoginIdentifier(identifier string) (string, error) {
+	trimmed := strings.TrimSpace(identifier)
+	if strings.EqualFold(trimmed, bootstrapAdmin) {
+		return bootstrapAdmin, nil
+	}
+	return normalizeEmail(trimmed)
 }
 
 func validatePassword(password string) error {

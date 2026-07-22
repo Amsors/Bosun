@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth-store'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const email = ref('')
+const identifier = ref('')
 const password = ref('')
 const busy = ref(false)
 const error = ref('')
@@ -17,14 +17,14 @@ async function submit(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    await auth.login(email.value, password.value)
+    await auth.login(identifier.value, password.value)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/sessions'
     await router.push(redirect)
   } catch (cause) {
     error.value =
       cause instanceof ApiError && cause.code === 20003
         ? '登录尝试过多，请稍后再试。'
-        : '邮箱或密码不正确。'
+        : '用户名或密码不正确。'
   } finally {
     busy.value = false
   }
@@ -40,7 +40,15 @@ async function submit(): Promise<void> {
     </section>
     <form class="card auth-card" @submit.prevent="submit">
       <h2>登录 Bosun</h2>
-      <label>邮箱<input v-model="email" type="email" autocomplete="email" required /></label>
+      <label
+        >用户名或邮箱<input
+          v-model="identifier"
+          type="text"
+          pattern="(?:[aA][dD][mM][iI][nN]|[^@\s]+@[^@\s]+)"
+          title="请输入 admin 或有效邮箱"
+          autocomplete="username"
+          required
+      /></label>
       <label
         >密码<input
           v-model="password"

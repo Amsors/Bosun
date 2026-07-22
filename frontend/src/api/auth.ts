@@ -1,11 +1,11 @@
 import { request } from './client'
 import type { AuthData, MeData } from './contracts'
 
-export function login(email: string, password: string): Promise<AuthData> {
+export function login(identifier: string, password: string): Promise<AuthData> {
   return request('/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: identifier, password }),
   })
 }
 
