@@ -1,0 +1,48 @@
+{{- if and .Values.ingress.enabled .Values.certManager.enabled }}
+{{- $host := required "ingress.host is required when certManager.enabled=true" .Values.ingress.host -}}
+{{- $tlsSecretName := required "ingress.tlsSecretName is required when certManager.enabled=true" .Values.ingress.tlsSecretName -}}
+{{- $issuerName := required "certManager.clusterIssuerName is required when certManager.enabled=true" .Values.certManager.clusterIssuerName -}}
+{{- $accountKeySecretName := required "certManager.accountKeySecretName is required when certManager.enabled=true" .Values.certManager.accountKeySecretName -}}
+{{- $email := required "certManager.email is required when certManager.enabled=true" .Values.certManager.email -}}
+{{- $acmeServer := required "certManager.acmeServer is required when certManager.enabled=true" .Values.certManager.acmeServer -}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $issuerName }}
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ $email | quote }}
+    server: {{ $acmeServer | quote }}
+    privateKeySecretRef:
+      name: {{ $accountKeySecretName }}
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.ingress.className }}
+            podTemplate:
+              spec:
+                nodeSelector:
+                  role: core
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: bosun-tls
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $tlsSecretName }}
+  dnsNames:
+    - {{ $host | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ $issuerName }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  revisionHistoryLimit: 2
+{{- end }}

@@ -1,0 +1,59 @@
+{{- if .Values.ingress.enabled }}
+{{- $host := required "ingress.host is required when ingress.enabled=true" .Values.ingress.host -}}
+{{- $className := required "ingress.className is required when ingress.enabled=true" .Values.ingress.className -}}
+{{- $httpEntryPoint := required "ingress.entryPoints.http is required when ingress.enabled=true" .Values.ingress.entryPoints.http -}}
+{{- $httpsEntryPoint := required "ingress.entryPoints.https is required when ingress.enabled=true" .Values.ingress.entryPoints.https -}}
+{{- $tlsSecretName := required "ingress.tlsSecretName is required when ingress.enabled=true" .Values.ingress.tlsSecretName -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bosun-frontend-http
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ $httpEntryPoint | quote }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-bosun-redirect-https@kubernetescrd" .Release.Namespace | quote }}
+spec:
+  ingressClassName: {{ $className }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bosun-frontend
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bosun-frontend-https
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ $httpsEntryPoint | quote }}
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- if .Values.ingress.rateLimit.enabled }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-bosun-ip-ratelimit@kubernetescrd" .Release.Namespace | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $className }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ $tlsSecretName }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bosun-frontend
+                port:
+                  number: 8080
+{{- end }}

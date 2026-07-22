@@ -1,0 +1,17 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    nodeSelector:
+      role: edge
+    tolerations:
+      - key: bosun.io/edge
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    service:
+      spec:
+        externalTrafficPolicy: Local

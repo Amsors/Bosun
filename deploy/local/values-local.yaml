@@ -12,5 +12,9 @@ auth:
   trustedProxyHeader: ""
 
 ingress:
+  enabled: false
   rateLimit:
     enabled: false
+
+certManager:
+  enabled: false

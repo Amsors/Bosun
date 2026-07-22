@@ -21,6 +21,43 @@ rendered="$(helm template bosun "${root}/deploy/chart" \
   --kube-version 1.36.0 \
   --include-crds)"
 
+public_rendered="$(helm template bosun "${root}/deploy/chart" \
+  --namespace bosun-platform \
+  --kube-version 1.36.0 \
+  --set ingress.enabled=true \
+  --set certManager.enabled=true \
+  --set certManager.email=ops@example.com)"
+
+for resource in \
+  'kind: ClusterIssuer' \
+  'kind: Certificate' \
+  'name: bosun-frontend-http' \
+  'name: bosun-frontend-https' \
+  'secretName: bosun-tls'; do
+  if ! grep -q "${resource}" <<<"${public_rendered}"; then
+    echo "public ingress render is missing ${resource}" >&2
+    exit 1
+  fi
+done
+
+if ! grep -q 'host: "bosun.amsors.com"' <<<"${public_rendered}"; then
+  echo "public ingress is missing the production host" >&2
+  exit 1
+fi
+
+if ! grep -A8 'ingressClassName: traefik' <<<"${public_rendered}" |
+  grep -A2 'nodeSelector:' |
+  grep -q 'role: core'; then
+  echo "ACME HTTP-01 solver is not pinned to a core node" >&2
+  exit 1
+fi
+
+if ! grep -A20 'kind: HelmChartConfig' "${root}/deploy/cluster/traefik-config.yaml" |
+  grep -q 'externalTrafficPolicy: Local'; then
+  echo "Traefik is not configured to preserve public client IPs" >&2
+  exit 1
+fi
+
 if ! grep -A4 'resources: \["clusterroles"\]' <<<"${rendered}" |
   grep -A2 'resourceNames: \["bosun-user-backend-terminal"\]' |
   grep -q 'verbs: \["bind"\]'; then

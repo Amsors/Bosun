@@ -45,12 +45,26 @@ auth:
   trustedProxyHeader: X-Forwarded-For
 
 ingress:
+  enabled: false
+  className: traefik
+  host: bosun.amsors.com
+  entryPoints:
+    http: web
+    https: websecure
+  tlsSecretName: bosun-tls
   rateLimit:
     enabled: true
     average: 100
     burst: 50
     period: 1m
     ipDepth: 1
+
+certManager:
+  enabled: false
+  clusterIssuerName: bosun-letsencrypt-production
+  accountKeySecretName: bosun-letsencrypt-production-account-key
+  email: ""
+  acmeServer: https://acme-v02.api.letsencrypt.org/directory
 
 images:
   api: backend-api

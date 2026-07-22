@@ -1,6 +1,17 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: bosun-redirect-https
+  labels:
+    {{- include "bosun.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
 {{- if .Values.ingress.rateLimit.enabled }}
+---
 # Traefik 粗粒度按源 IP 限流（spec/techspec §7.3）。细粒度登录限流由 backend 进程内 limiter 承担；
-# 此处为 ingress 层兜底。绑定到 IngressRoute 的工作在前端 ingress 落地（T1.8/T1.14）时完成。
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -15,4 +26,5 @@ spec:
     sourceCriterion:
       ipStrategy:
         depth: {{ .Values.ingress.rateLimit.ipDepth }}
+{{- end }}
 {{- end }}
