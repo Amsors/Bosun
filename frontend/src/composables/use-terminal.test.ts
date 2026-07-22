@@ -154,7 +154,7 @@ describe('useTerminal', () => {
     scope.stop()
   })
 
-  it('stops reconnecting when the terminal runtime has ended', async () => {
+  it('reconnects when the terminal runtime is recreated', async () => {
     vi.useFakeTimers()
     const sockets: FakeWebSocket[] = []
     const getSessionPhase = vi.fn(async (): Promise<SessionPhase> => 'Running')
@@ -180,11 +180,13 @@ describe('useTerminal', () => {
     controller.connect()
     sockets[0]?.open()
     sockets[0]?.close(4004, 'terminal_runtime_ended')
-    await vi.runAllTimersAsync()
+    await flushPromises()
 
-    expect(controller.status.value).toBe('ended')
+    expect(controller.status.value).toBe('reconnecting')
     expect(sockets).toHaveLength(1)
-    expect(getSessionPhase).not.toHaveBeenCalled()
+    expect(getSessionPhase).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(sockets).toHaveLength(2)
     scope.stop()
   })
 

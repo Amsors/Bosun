@@ -228,6 +228,11 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "userenvironment")
 		os.Exit(1)
 	}
+	quiescer, err := controller.NewKubernetesQuiescer(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "Failed to create agent quiescer")
+		os.Exit(1)
+	}
 	if err := (&controller.AgentSessionReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
@@ -237,6 +242,7 @@ func main() {
 		GatewayURL:       gatewayURL,
 		EgressProxyURL:   egressProxyURL,
 		IdleScanInterval: idleScanInterval,
+		Quiescer:         quiescer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentsession")
 		os.Exit(1)

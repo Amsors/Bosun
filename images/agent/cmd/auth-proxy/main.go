@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -25,6 +26,11 @@ const (
 )
 
 type tokenContextKey struct{}
+
+type proxyState struct {
+	draining       atomic.Bool
+	activeRequests atomic.Int64
+}
 
 type options struct {
 	listenAddress string
@@ -103,6 +109,7 @@ func parseOptions(args []string) (options, error) {
 }
 
 func newHandler(target *url.URL, tokenFile string) http.Handler {
+	state := &proxyState{}
 	proxy := &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
 			request.URL.Scheme = target.Scheme
@@ -137,6 +144,20 @@ func newHandler(target *url.URL, tokenFile string) http.Handler {
 			_ = json.NewEncoder(writer).Encode(map[string]string{"status": "ok"})
 			return
 		}
+		if request.URL.Path == "/__bosun/drain" {
+			handleDrain(writer, request, state)
+			return
+		}
+		if state.draining.Load() {
+			writeError(writer, http.StatusServiceUnavailable, "proxy_draining")
+			return
+		}
+		state.activeRequests.Add(1)
+		defer state.activeRequests.Add(-1)
+		if state.draining.Load() {
+			writeError(writer, http.StatusServiceUnavailable, "proxy_draining")
+			return
+		}
 		tokenBytes, err := os.ReadFile(tokenFile)
 		if err != nil || strings.TrimSpace(string(tokenBytes)) == "" {
 			slog.Warn("projected token is unavailable", "reason", "token_unavailable")
@@ -145,6 +166,43 @@ func newHandler(target *url.URL, tokenFile string) http.Handler {
 		}
 		token := strings.TrimSpace(string(tokenBytes))
 		proxy.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), tokenContextKey{}, token)))
+	})
+}
+
+func handleDrain(writer http.ResponseWriter, request *http.Request, state *proxyState) {
+	if request.Method != http.MethodPost {
+		writer.Header().Set("Allow", http.MethodPost)
+		writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	timeout := 25 * time.Second
+	if raw := request.URL.Query().Get("timeout"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 || parsed > 30*time.Second {
+			writeError(writer, http.StatusBadRequest, "invalid_timeout")
+			return
+		}
+		timeout = parsed
+	}
+	state.draining.Store(true)
+	deadline := time.Now().Add(timeout)
+	for state.activeRequests.Load() > 0 && time.Now().Before(deadline) {
+		select {
+		case <-request.Context().Done():
+			return
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	active := state.activeRequests.Load()
+	status := http.StatusOK
+	if active > 0 {
+		status = http.StatusConflict
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(status)
+	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"draining":       true,
+		"activeRequests": active,
 	})
 }
 

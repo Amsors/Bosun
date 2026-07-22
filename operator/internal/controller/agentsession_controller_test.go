@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,6 +59,9 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if len(pod.Spec.Containers) != 2 {
 		t.Fatalf("containers = %d, want agent + auth-proxy", len(pod.Spec.Containers))
 	}
+	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != "runtime-init" {
+		t.Fatalf("init containers = %#v, want runtime-init", pod.Spec.InitContainers)
+	}
 	if pod.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways ||
 		pod.Spec.Containers[1].ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("agent image pull policies = %q, %q", pod.Spec.Containers[0].ImagePullPolicy, pod.Spec.Containers[1].ImagePullPolicy)
@@ -76,6 +80,7 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	}
 	assertGatewayTokenProjection(t, &pod)
 	assertLLMEgressConfiguration(t, &pod)
+	assertPersistentRuntimeMounts(t, &pod)
 	if len(pod.Spec.Tolerations) != 2 ||
 		pod.Spec.Tolerations[0].TolerationSeconds == nil ||
 		*pod.Spec.Tolerations[0].TolerationSeconds != 300 {
@@ -198,13 +203,60 @@ func TestAgentSessionExplicitHibernateRemainsStable(t *testing.T) {
 		t.Fatalf("request hibernation: %v", err)
 	}
 
-	reconcileAgentSession(t, reconciler, session, 3)
+	reconcileAgentSession(t, reconciler, session, 4)
 	for i := range 3 {
 		getObject(t, clientKey(session), &current)
 		if current.Status.Phase != bosunv1alpha1.AgentSessionPhaseHibernated {
 			t.Fatalf("phase after hibernation reconcile #%d = %q, want Hibernated", i+1, current.Status.Phase)
 		}
 		reconcileAgentSession(t, reconciler, session, 1)
+	}
+}
+
+func TestAgentSessionDoesNotDeletePodBeforeApplicationRecoveryIsReady(t *testing.T) {
+	ctx := context.Background()
+	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012410", "018f9c6e-1234-7000-8000-abcdef012510")
+	reconciler := newAgentSessionReconciler()
+	quiescer := &fakeAgentQuiescer{err: errors.New("drain timeout")}
+	reconciler.Quiescer = quiescer
+	reconcileAgentSession(t, reconciler, session, 4)
+
+	var pod corev1.Pod
+	getObject(t, namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)), &pod)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	if err := testClient.Status().Update(ctx, &pod); err != nil {
+		t.Fatalf("set test Pod ready: %v", err)
+	}
+	reconcileAgentSession(t, reconciler, session, 1)
+
+	var current bosunv1alpha1.AgentSession
+	getObject(t, clientKey(session), &current)
+	current.Spec.DesiredState = bosunv1alpha1.DesiredStateHibernated
+	if err := testClient.Update(ctx, &current); err != nil {
+		t.Fatalf("request hibernation: %v", err)
+	}
+	reconcileAgentSession(t, reconciler, session, 2)
+
+	getObject(t, namespacedName(session.Namespace, pod.Name), &pod)
+	getObject(t, clientKey(session), &current)
+	if quiescer.calls != 1 {
+		t.Fatalf("quiesce calls = %d, want 1", quiescer.calls)
+	}
+	if current.Status.Phase != bosunv1alpha1.AgentSessionPhaseHibernating ||
+		current.Status.RuntimeCheckpoint == nil ||
+		current.Status.RuntimeCheckpoint.State != bosunv1alpha1.RuntimeCheckpointStateCreating {
+		t.Fatalf("status after failed quiesce = %#v", current.Status)
+	}
+
+	quiescer.err = nil
+	reconcileAgentSession(t, reconciler, session, 1)
+	getObject(t, namespacedName(session.Namespace, pod.Name), &pod)
+	getObject(t, clientKey(session), &current)
+	if current.Status.RuntimeCheckpoint == nil ||
+		current.Status.RuntimeCheckpoint.State != bosunv1alpha1.RuntimeCheckpointStateReady ||
+		current.Status.RuntimeCheckpoint.SHA256 == "" {
+		t.Fatalf("ready recovery status = %#v", current.Status.RuntimeCheckpoint)
 	}
 }
 
@@ -395,7 +447,24 @@ func newAgentSessionReconciler() *AgentSessionReconciler {
 		AgentPullPolicy:  corev1.PullAlways,
 		StorageClassName: "local-path", GatewayURL: "http://bosun-gateway:8081",
 		EgressProxyURL: "http://bosun-egress-proxy:3128", IdleScanInterval: time.Millisecond,
+		Quiescer: &fakeAgentQuiescer{},
 	}
+}
+
+type fakeAgentQuiescer struct {
+	err   error
+	calls int
+}
+
+func (q *fakeAgentQuiescer) Quiesce(_ context.Context, pod *corev1.Pod) (QuiesceResult, error) {
+	q.calls++
+	if q.err != nil {
+		return QuiesceResult{}, q.err
+	}
+	return QuiesceResult{
+		CreatedAt: time.Now().UTC(), SizeBytes: 128, SHA256: strings.Repeat("a", 64),
+		AgentImageDigest: podAgentImageDigest(pod),
+	}, nil
 }
 
 func reconcileAgentSession(t *testing.T, reconciler *AgentSessionReconciler, session *bosunv1alpha1.AgentSession, count int) {
@@ -483,5 +552,23 @@ func assertLLMEgressConfiguration(t *testing.T, pod *corev1.Pod) {
 		proxy.ReadinessProbe.Exec == nil ||
 		len(proxy.ReadinessProbe.Exec.Command) != 2 {
 		t.Fatalf("auth proxy configuration = %#v", proxy)
+	}
+}
+
+func assertPersistentRuntimeMounts(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	mounts := make(map[string]corev1.VolumeMount)
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		mounts[mount.MountPath] = mount
+	}
+	if mounts["/workspace"].Name != workspaceVolume ||
+		mounts["/tmp"].SubPath != ".bosun-state/runtime/tmp" ||
+		mounts["/run/bosun-tmux"].SubPath != ".bosun-state/runtime/tmux" {
+		t.Fatalf("agent runtime mounts = %#v", mounts)
+	}
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "tmp" || volume.Name == "tmux" {
+			t.Fatalf("agent runtime volume %q must use the workspace PVC", volume.Name)
+		}
 	}
 }

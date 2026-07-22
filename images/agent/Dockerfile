@@ -31,15 +31,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 bosun \
     && useradd --uid 10001 --gid bosun --create-home --shell /bin/bash bosun \
-    && install -d -m 0555 /etc/claude-code /usr/local/lib/bosun/hooks
+    && install -d -m 0555 /etc/claude-code /usr/local/lib/bosun/hooks /usr/local/share/bosun
 
 COPY --from=cli /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=cli /usr/local/bin/claude /usr/local/bin/claude
 COPY --from=auth-proxy /out/bosun-auth-proxy /usr/local/bin/bosun-auth-proxy
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/bosun-entrypoint
 COPY --chmod=0755 shell-supervisor.sh /usr/local/bin/bosun-shell-supervisor
+COPY --chmod=0755 runtime-control.sh /usr/local/bin/bosun-runtime-control
 COPY --chmod=0755 hooks/session-start.sh /usr/local/lib/bosun/hooks/session-start
 COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.json
+COPY --chmod=0444 recovery.schema.json /usr/local/share/bosun/recovery.schema.json
 
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     DISABLE_AUTOUPDATER=1 \

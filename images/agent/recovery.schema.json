@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bosun.io/schemas/agent-recovery-v1.json",
+  "title": "Bosun agent application recovery manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sessionID",
+    "createdAt",
+    "agent",
+    "workspace",
+    "tmux",
+    "claude",
+    "terminal",
+    "quiesce"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sessionID": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["imageDigest", "imageReference", "claudeCodeVersion"],
+      "properties": {
+        "imageDigest": { "type": "string" },
+        "imageReference": { "type": "string" },
+        "claudeCodeVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": { "path": { "type": "string", "pattern": "^/workspace(?:/.*)?$" } }
+    },
+    "tmux": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session", "window", "pane", "cols", "rows", "currentCommand"],
+      "properties": {
+        "session": { "const": "bosun" },
+        "window": { "type": "string" },
+        "pane": { "type": "string" },
+        "cols": { "type": "integer", "minimum": 1 },
+        "rows": { "type": "integer", "minimum": 1 },
+        "currentCommand": { "type": "string" }
+      }
+    },
+    "claude": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionID", "wasRunning"],
+      "properties": {
+        "sessionID": { "type": ["string", "null"] },
+        "wasRunning": { "type": "boolean" }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": { "const": "/workspace/.bosun-state/terminal.cast" },
+        "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "quiesce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["succeeded", "unfinishedExternalRequests"],
+      "properties": {
+        "succeeded": { "const": true },
+        "unfinishedExternalRequests": { "const": false }
+      }
+    }
+  }
+}

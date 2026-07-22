@@ -21,6 +21,8 @@ type Runtime string
 type ProviderMode string
 type StoragePolicy string
 type AgentSessionPhase string
+type RuntimeCheckpointMode string
+type RuntimeCheckpointState string
 
 const (
 	DesiredStateRunning    DesiredState = "Running"
@@ -48,6 +50,15 @@ const (
 	AgentSessionPhaseRestoring    AgentSessionPhase = "Restoring"
 	AgentSessionPhaseDeleting     AgentSessionPhase = "Deleting"
 	AgentSessionPhaseFailed       AgentSessionPhase = "Failed"
+
+	RuntimeCheckpointModeApplication RuntimeCheckpointMode = "Application"
+	RuntimeCheckpointModeProcess     RuntimeCheckpointMode = "Process"
+
+	RuntimeCheckpointStateCreating  RuntimeCheckpointState = "Creating"
+	RuntimeCheckpointStateReady     RuntimeCheckpointState = "Ready"
+	RuntimeCheckpointStateRestoring RuntimeCheckpointState = "Restoring"
+	RuntimeCheckpointStateConsumed  RuntimeCheckpointState = "Consumed"
+	RuntimeCheckpointStateFailed    RuntimeCheckpointState = "Failed"
 )
 
 type ProviderSpec struct {
@@ -109,17 +120,41 @@ type ArchiveStatus struct {
 	SizeBytes int64  `json:"sizeBytes,omitempty"`
 }
 
+type RuntimeVersions struct {
+	Containerd string `json:"containerd,omitempty"`
+	Runc       string `json:"runc,omitempty"`
+	CRIU       string `json:"criu,omitempty"`
+}
+
+type RuntimeCheckpointStatus struct {
+	// +kubebuilder:validation:Enum=Application;Process
+	Mode RuntimeCheckpointMode `json:"mode"`
+
+	// +kubebuilder:validation:Enum=Creating;Ready;Restoring;Consumed;Failed
+	State RuntimeCheckpointState `json:"state"`
+
+	ID               string          `json:"id,omitempty"`
+	NodeName         string          `json:"nodeName,omitempty"`
+	CreatedAt        *metav1.Time    `json:"createdAt,omitempty"`
+	SizeBytes        int64           `json:"sizeBytes,omitempty"`
+	SHA256           string          `json:"sha256,omitempty"`
+	AgentImageDigest string          `json:"agentImageDigest,omitempty"`
+	RuntimeVersions  RuntimeVersions `json:"runtimeVersions,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+}
+
 type AgentSessionStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Running;Idle;Hibernating;Hibernated;Archiving;Archived;Restoring;Deleting;Failed
 	Phase AgentSessionPhase `json:"phase,omitempty"`
 
-	ObservedGeneration  int64         `json:"observedGeneration,omitempty"`
-	ObservedResumeNonce string        `json:"observedResumeNonce,omitempty"`
-	NodeName            string        `json:"nodeName,omitempty"`
-	PodName             string        `json:"podName,omitempty"`
-	PVCName             string        `json:"pvcName,omitempty"`
-	LastActiveAt        *metav1.Time  `json:"lastActiveAt,omitempty"`
-	Archive             ArchiveStatus `json:"archive,omitempty"`
+	ObservedGeneration  int64                    `json:"observedGeneration,omitempty"`
+	ObservedResumeNonce string                   `json:"observedResumeNonce,omitempty"`
+	NodeName            string                   `json:"nodeName,omitempty"`
+	PodName             string                   `json:"podName,omitempty"`
+	PVCName             string                   `json:"pvcName,omitempty"`
+	LastActiveAt        *metav1.Time             `json:"lastActiveAt,omitempty"`
+	Archive             ArchiveStatus            `json:"archive,omitempty"`
+	RuntimeCheckpoint   *RuntimeCheckpointStatus `json:"runtimeCheckpoint,omitempty"`
 
 	// +listType=map
 	// +listMapKey=type

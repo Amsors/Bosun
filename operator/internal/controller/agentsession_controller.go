@@ -42,6 +42,7 @@ const (
 	sessionReadyCondition  = "Ready"
 	sessionRetryCondition  = "ReconcileRetry"
 	gatewayTokenVolume     = "gateway-token"
+	workspaceVolume        = "workspace"
 	freePriorityClass      = "bosun-free"
 	deadlineExceededReason = "DeadlineExceeded"
 	maxTransientRetries    = 10
@@ -61,12 +62,14 @@ type AgentSessionReconciler struct {
 	EgressProxyURL   string
 	IdleScanInterval time.Duration
 	Now              func() time.Time
+	Quiescer         AgentQuiescer
 }
 
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;pods;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile drives one AgentSession toward its desired state without modifying spec.
@@ -105,6 +108,10 @@ func (r *AgentSessionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	switch {
+	case session.Status.Phase == bosunv1alpha1.AgentSessionPhaseFailed &&
+		session.Status.ObservedGeneration == session.Generation &&
+		session.Status.ObservedResumeNonce == session.Spec.ResumeNonce:
+		return ctrl.Result{}, nil
 	case session.Spec.DesiredState == bosunv1alpha1.DesiredStateHibernated &&
 		session.Status.Phase == bosunv1alpha1.AgentSessionPhaseHibernated:
 		// The desired state has already been reached. Keep Hibernated stable
@@ -117,10 +124,6 @@ func (r *AgentSessionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// Finish deleting the old Pod before consuming a resume received mid-hibernation.
 		return r.reconcileHibernate(ctx, &session)
 	case session.Status.Phase == bosunv1alpha1.AgentSessionPhaseHibernated &&
-		session.Status.ObservedResumeNonce == session.Spec.ResumeNonce:
-		return ctrl.Result{}, nil
-	case session.Status.Phase == bosunv1alpha1.AgentSessionPhaseFailed &&
-		session.Status.ObservedGeneration == session.Generation &&
 		session.Status.ObservedResumeNonce == session.Spec.ResumeNonce:
 		return ctrl.Result{}, nil
 	}
@@ -166,6 +169,9 @@ func (r *AgentSessionReconciler) reconcileRunning(
 			status.Phase = phase
 			status.PVCName = pvc.Name
 			status.ObservedGeneration = session.Generation
+			if restoring && status.RuntimeCheckpoint != nil {
+				status.RuntimeCheckpoint.State = bosunv1alpha1.RuntimeCheckpointStateRestoring
+			}
 			setSessionCondition(status, session.Generation, metav1.ConditionFalse, string(phase), "Agent workload is being prepared")
 		}); err != nil {
 			return ctrl.Result{}, err
@@ -250,6 +256,11 @@ func (r *AgentSessionReconciler) reconcileRunning(
 		status.PVCName = pvc.Name
 		status.ObservedGeneration = session.Generation
 		status.ObservedResumeNonce = pod.Annotations[sessionidentity.ResumeNonceAnnotation]
+		if status.RuntimeCheckpoint != nil &&
+			(status.RuntimeCheckpoint.State == bosunv1alpha1.RuntimeCheckpointStateReady ||
+				status.RuntimeCheckpoint.State == bosunv1alpha1.RuntimeCheckpointStateRestoring) {
+			status.RuntimeCheckpoint.State = bosunv1alpha1.RuntimeCheckpointStateConsumed
+		}
 		clearRetryCondition(status)
 		setSessionCondition(status, session.Generation, metav1.ConditionTrue, "SessionRunning", "Agent Pod and persistent terminal are ready")
 	}); err != nil {
@@ -267,7 +278,11 @@ func (r *AgentSessionReconciler) reconcileHibernate(
 		if err := r.setStatus(ctx, key, session.Generation, func(status *bosunv1alpha1.AgentSessionStatus) {
 			status.Phase = bosunv1alpha1.AgentSessionPhaseHibernating
 			status.ObservedGeneration = session.Generation
-			setSessionCondition(status, session.Generation, metav1.ConditionFalse, "Hibernating", "Agent Pod is stopping; workspace PVC is retained")
+			status.RuntimeCheckpoint = &bosunv1alpha1.RuntimeCheckpointStatus{
+				Mode: bosunv1alpha1.RuntimeCheckpointModeApplication, State: bosunv1alpha1.RuntimeCheckpointStateCreating,
+				ID: session.Spec.ResumeNonce, NodeName: status.NodeName,
+			}
+			setSessionCondition(status, session.Generation, metav1.ConditionFalse, "Quiescing", "Agent runtime is draining before hibernation")
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -278,6 +293,45 @@ func (r *AgentSessionReconciler) reconcileHibernate(
 		return r.handleTransient(ctx, session, err)
 	}
 	if exists {
+		checkpoint := session.Status.RuntimeCheckpoint
+		if checkpoint == nil || checkpoint.Mode != bosunv1alpha1.RuntimeCheckpointModeApplication ||
+			checkpoint.ID != session.Spec.ResumeNonce {
+			if err := r.setStatus(ctx, key, session.Generation, func(status *bosunv1alpha1.AgentSessionStatus) {
+				status.RuntimeCheckpoint = &bosunv1alpha1.RuntimeCheckpointStatus{
+					Mode: bosunv1alpha1.RuntimeCheckpointModeApplication, State: bosunv1alpha1.RuntimeCheckpointStateCreating,
+					ID: session.Spec.ResumeNonce, NodeName: pod.Spec.NodeName,
+				}
+				setSessionCondition(status, session.Generation, metav1.ConditionFalse, "Quiescing", "Agent runtime is draining before hibernation")
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+		if checkpoint.State == bosunv1alpha1.RuntimeCheckpointStateCreating {
+			if r.Quiescer == nil {
+				return r.handleTransient(ctx, session, fmt.Errorf("agent quiescer is not configured"))
+			}
+			result, quiesceErr := r.Quiescer.Quiesce(ctx, pod)
+			if quiesceErr != nil {
+				return r.handleTransient(ctx, session, fmt.Errorf("quiesce agent Pod %s: %w", pod.Name, quiesceErr))
+			}
+			createdAt := metav1.NewTime(result.CreatedAt)
+			if err := r.setStatus(ctx, key, session.Generation, func(status *bosunv1alpha1.AgentSessionStatus) {
+				status.RuntimeCheckpoint = &bosunv1alpha1.RuntimeCheckpointStatus{
+					Mode: bosunv1alpha1.RuntimeCheckpointModeApplication, State: bosunv1alpha1.RuntimeCheckpointStateReady,
+					ID: session.Spec.ResumeNonce, NodeName: pod.Spec.NodeName, CreatedAt: &createdAt,
+					SizeBytes: result.SizeBytes, SHA256: result.SHA256, AgentImageDigest: result.AgentImageDigest,
+				}
+				clearRetryCondition(status)
+				setSessionCondition(status, session.Generation, metav1.ConditionFalse, "RecoveryReady", "Application recovery manifest is durable; Agent Pod is stopping")
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+		if checkpoint.State != bosunv1alpha1.RuntimeCheckpointStateReady {
+			return r.fail(ctx, session, "RecoveryUnavailable", "Application recovery manifest is not ready")
+		}
 		grace := maxHibernateGrace
 		if err := r.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: &grace}); err != nil && !apierrors.IsNotFound(err) {
 			return r.handleTransient(ctx, session, fmt.Errorf("delete Pod %s during hibernation: %w", pod.Name, err))
@@ -506,6 +560,8 @@ func (r *AgentSessionReconciler) desiredPod(
 					Image:           r.AgentImage,
 					ImagePullPolicy: r.AgentPullPolicy,
 					Env: []corev1.EnvVar{
+						{Name: "BOSUN_SESSION_ID", Value: session.Spec.SessionID},
+						{Name: "BOSUN_AGENT_IMAGE", Value: r.AgentImage},
 						{Name: "ANTHROPIC_BASE_URL", Value: "http://127.0.0.1:8080"},
 						{Name: "ANTHROPIC_API_KEY", Value: "sk-xxxx"},
 						{Name: "HTTPS_PROXY", Value: r.EgressProxyURL},
@@ -514,9 +570,9 @@ func (r *AgentSessionReconciler) desiredPod(
 					Resources:       corev1.ResourceRequirements{Requests: agentRequests, Limits: agentLimits},
 					SecurityContext: restrictedContainerSecurityContext(&noPrivilege, &readOnly),
 					VolumeMounts: []corev1.VolumeMount{
-						{Name: "workspace", MountPath: "/workspace"},
-						{Name: "tmp", MountPath: "/tmp"},
-						{Name: "tmux", MountPath: "/run/bosun-tmux"},
+						{Name: workspaceVolume, MountPath: "/workspace"},
+						{Name: workspaceVolume, MountPath: "/tmp", SubPath: ".bosun-state/runtime/tmp"},
+						{Name: workspaceVolume, MountPath: "/run/bosun-tmux", SubPath: ".bosun-state/runtime/tmux"},
 					},
 					ReadinessProbe: execProbe("tmux", "has-session", "-t", "bosun"),
 					LivenessProbe:  execProbe("tmux", "has-session", "-t", "bosun"),
@@ -551,15 +607,26 @@ func (r *AgentSessionReconciler) desiredPod(
 					),
 				},
 			},
+			InitContainers: []corev1.Container{{
+				Name:            "runtime-init",
+				Image:           r.AgentImage,
+				ImagePullPolicy: r.AgentPullPolicy,
+				Command:         []string{"/bin/bash", "-c"},
+				Args:            []string{"install -d -m 0700 /workspace/.bosun-state/runtime/tmp /workspace/.bosun-state/runtime/tmux"},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5m"), corev1.ResourceMemory: resource.MustParse("8Mi")},
+					Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("25m"), corev1.ResourceMemory: resource.MustParse("32Mi")},
+				},
+				SecurityContext: restrictedContainerSecurityContext(&noPrivilege, &readOnly),
+				VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolume, MountPath: "/workspace"}},
+			}},
 			Volumes: []corev1.Volume{
 				{
-					Name: "workspace",
+					Name: workspaceVolume,
 					VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: pvcName,
 					}},
 				},
-				{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: quantityPtr("1Gi")}}},
-				{Name: "tmux", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: quantityPtr("16Mi")}}},
 				{Name: "proxy-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: quantityPtr("16Mi")}}},
 				{
 					Name: gatewayTokenVolume,
@@ -657,6 +724,12 @@ func (r *AgentSessionReconciler) fail(
 		status.Phase = bosunv1alpha1.AgentSessionPhaseFailed
 		status.ObservedGeneration = session.Generation
 		status.ObservedResumeNonce = session.Spec.ResumeNonce
+		if status.RuntimeCheckpoint != nil &&
+			(status.RuntimeCheckpoint.State == bosunv1alpha1.RuntimeCheckpointStateCreating ||
+				status.RuntimeCheckpoint.State == bosunv1alpha1.RuntimeCheckpointStateRestoring) {
+			status.RuntimeCheckpoint.State = bosunv1alpha1.RuntimeCheckpointStateFailed
+			status.RuntimeCheckpoint.Reason = reason
+		}
 		setSessionCondition(status, session.Generation, metav1.ConditionFalse, reason, message)
 	})
 	return ctrl.Result{}, err
@@ -851,6 +924,8 @@ func (r *AgentSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("gateway URL must not be empty")
 	case r.EgressProxyURL == "":
 		return fmt.Errorf("egress proxy URL must not be empty")
+	case r.Quiescer == nil:
+		return fmt.Errorf("agent quiescer must not be nil")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&bosunv1alpha1.AgentSession{}).

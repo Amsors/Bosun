@@ -223,6 +223,50 @@ spec:
                 type: string
               pvcName:
                 type: string
+              runtimeCheckpoint:
+                properties:
+                  agentImageDigest:
+                    type: string
+                  createdAt:
+                    format: date-time
+                    type: string
+                  id:
+                    type: string
+                  mode:
+                    enum:
+                    - Application
+                    - Process
+                    type: string
+                  nodeName:
+                    type: string
+                  reason:
+                    type: string
+                  runtimeVersions:
+                    properties:
+                      containerd:
+                        type: string
+                      criu:
+                        type: string
+                      runc:
+                        type: string
+                    type: object
+                  sha256:
+                    type: string
+                  sizeBytes:
+                    format: int64
+                    type: integer
+                  state:
+                    enum:
+                    - Creating
+                    - Ready
+                    - Restoring
+                    - Consumed
+                    - Failed
+                    type: string
+                required:
+                - mode
+                - state
+                type: object
             type: object
         required:
         - spec

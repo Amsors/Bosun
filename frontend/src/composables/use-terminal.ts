@@ -148,8 +148,8 @@ export function useTerminal(options: UseTerminalOptions): TerminalController {
         return
       }
       if (event.code === runtimeEndedCloseCode) {
-        stopped = true
         status.value = 'ended'
+        void scheduleReconnect()
         return
       }
       if ((!opened || event.code === authenticationCloseCode) && !refreshAttempted) {

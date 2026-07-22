@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestAuthProxyReadsRotatedTokenForEveryRequest(t *testing.T) {
@@ -82,6 +84,61 @@ func TestHealthEndpointDoesNotRequireToken(t *testing.T) {
 	newHandler(target, filepath.Join(t.TempDir(), "missing")).ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("health status = %d", response.Code)
+	}
+}
+
+func TestDrainWaitsForActiveRequestAndRejectsNewWork(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		once.Do(func() { close(started) })
+		<-release
+		writer.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+	target, err := urlParse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(newHandler(target, tokenFile))
+	t.Cleanup(proxy.Close)
+
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		response, requestErr := http.Get(proxy.URL + "/v1/messages")
+		if requestErr == nil {
+			_ = response.Body.Close()
+		}
+	}()
+	<-started
+
+	drainDone := make(chan *http.Response, 1)
+	go func() {
+		request, _ := http.NewRequest(http.MethodPost, proxy.URL+"/__bosun/drain?timeout=2s", nil)
+		response, _ := http.DefaultClient.Do(request)
+		drainDone <- response
+	}()
+	time.Sleep(50 * time.Millisecond)
+	response, err := http.Get(proxy.URL + "/v1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("new request during drain status = %d", response.StatusCode)
+	}
+	close(release)
+	<-requestDone
+	drainResponse := <-drainDone
+	defer func() { _ = drainResponse.Body.Close() }()
+	if drainResponse.StatusCode != http.StatusOK {
+		t.Fatalf("drain status = %d", drainResponse.StatusCode)
 	}
 }
 
