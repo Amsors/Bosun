@@ -6,6 +6,7 @@ import TerminalPanel from './terminal-panel.vue'
 const connect = vi.fn()
 const disconnect = vi.fn()
 const resize = vi.fn()
+const terminalOptions = vi.hoisted(() => ({ value: null as Record<string, unknown> | null }))
 
 vi.mock('../composables/use-terminal', () => ({
   useTerminal: () => ({
@@ -22,6 +23,11 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80
     rows = 24
+
+    constructor(options: Record<string, unknown>) {
+      terminalOptions.value = options
+    }
+
     loadAddon = vi.fn()
     open = vi.fn()
     onData = vi.fn()
@@ -43,6 +49,7 @@ class ResizeObserverStub {
 
 describe('TerminalPanel', () => {
   beforeEach(() => {
+    terminalOptions.value = null
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   })
 
@@ -63,6 +70,12 @@ describe('TerminalPanel', () => {
 
     expect(resize).toHaveBeenCalledWith(80, 24)
     expect(connect).toHaveBeenCalledOnce()
+    expect(terminalOptions.value).toMatchObject({
+      scrollback: 10000,
+      scrollOnEraseInDisplay: true,
+      scrollOnUserInput: true,
+      scrollSensitivity: 1,
+    })
     wrapper.unmount()
     expect(disconnect).toHaveBeenCalledOnce()
   })

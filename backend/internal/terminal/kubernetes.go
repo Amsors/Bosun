@@ -106,7 +106,7 @@ func (k *KubernetesRuntime) Capture(ctx context.Context, target Target) ([]byte,
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := k.exec(captureCtx, target, []string{
-		"tmux", "capture-pane", "-p", "-e", "-t", "bosun",
+		"tmux", "capture-pane", "-p", "-e", "-S", "-", "-t", "bosun",
 	}, nil, &stdout, &stderr, false, nil)
 	if err != nil {
 		return nil, fmt.Errorf("capture terminal pane: %w (%s)", err, stableExecError(stderr.Bytes()))
@@ -123,7 +123,8 @@ func (k *KubernetesRuntime) Attach(
 	sizes remotecommand.TerminalSizeQueue,
 ) error {
 	if err := k.exec(ctx, target, []string{
-		"tmux", "attach-session", "-t", "bosun",
+		"tmux", "set-option", "-g", "terminal-overrides", "xterm*:smcup@:rmcup@",
+		";", "attach-session", "-t", "bosun",
 	}, stdin, stdout, stderr, true, sizes); err != nil {
 		return fmt.Errorf("attach terminal session: %w", err)
 	}

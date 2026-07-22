@@ -55,8 +55,17 @@ onMounted(() => {
     convertEol: false,
     fontFamily:
       '"Noto Sans Mono CJK SC", "Noto Sans Mono", "Cascadia Mono", "Microsoft YaHei Mono", "Microsoft YaHei", monospace',
-    scrollback: 5000,
-    theme: { background: '#101418', foreground: '#e7edf3' },
+    scrollback: 10000,
+    scrollOnEraseInDisplay: true,
+    scrollOnUserInput: true,
+    scrollSensitivity: 1,
+    theme: {
+      background: '#101418',
+      foreground: '#e7edf3',
+      scrollbarSliderBackground: '#71808a99',
+      scrollbarSliderHoverBackground: '#91a0aa',
+      scrollbarSliderActiveBackground: '#b0bec7',
+    },
   })
   fitAddon = new FitAddon()
   xterm.loadAddon(fitAddon)
@@ -87,7 +96,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .terminal-shell {
-  min-height: 24rem;
+  position: relative;
+  height: 32rem;
   overflow: hidden;
   border: 1px solid #34404b;
   border-radius: 0.5rem;
@@ -95,6 +105,11 @@ onBeforeUnmount(() => {
 }
 
 .terminal-notice {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
   margin: 0;
   padding: 0.55rem 0.75rem;
   color: #1b252e;
@@ -102,7 +117,32 @@ onBeforeUnmount(() => {
 }
 
 .terminal-host {
-  height: 32rem;
+  height: 100%;
+  overflow: hidden;
   padding: 0.5rem;
+}
+
+.terminal-host :deep(.xterm) {
+  height: 100%;
+}
+
+.terminal-host :deep(.xterm-viewport) {
+  overscroll-behavior: contain;
+  scrollbar-color: #71808a #101418;
+  scrollbar-width: thin;
+}
+
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 0.7rem;
+}
+
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: #101418;
+}
+
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  border: 2px solid #101418;
+  border-radius: 999px;
+  background: #71808a;
 }
 </style>

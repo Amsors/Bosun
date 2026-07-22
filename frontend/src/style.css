@@ -1,14 +1,14 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  color: #e8edf2;
-  background: #09100f;
+  color: #33312a;
+  background: #fdf9ec;
   font-synthesis: none;
-  --ink: #e8edf2;
-  --muted: #8b9b96;
-  --panel: #111b19;
-  --line: #263431;
-  --lime: #c7f36b;
-  --danger: #ff8d84;
+  --ink: #33312a;
+  --muted: #837d6c;
+  --panel: #ffffff;
+  --line: #e9e3cf;
+  --lime: #d9a514;
+  --danger: #c2453a;
 }
 * {
   box-sizing: border-box;
@@ -17,10 +17,10 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at 10% 0, #183128 0, transparent 35%), #09100f;
+  background: #fdf9ec;
 }
 a {
-  color: var(--lime);
+  color: #a87b00;
 }
 button,
 .button,
@@ -33,9 +33,14 @@ button,
   border-radius: 0.55rem;
   padding: 0.7rem 1rem;
   color: var(--ink);
-  background: #172522;
+  background: #ffffff;
   cursor: pointer;
   text-decoration: none;
+}
+button:hover,
+.button:hover {
+  border-color: #d8cfae;
+  background: #fbf7ea;
 }
 button:focus-visible,
 a:focus-visible,
@@ -48,15 +53,23 @@ button:disabled {
   cursor: wait;
 }
 .primary {
-  color: #13200d;
+  color: #fffdf5;
   border-color: var(--lime);
   background: var(--lime);
   font-weight: 750;
 }
+.primary:hover {
+  background: #c49312;
+  border-color: #c49312;
+}
 .danger {
   color: var(--danger);
-  border-color: #693d3a;
+  border-color: #ecc6c0;
   margin-left: auto;
+}
+.danger:hover {
+  background: #fdf1ef;
+  border-color: #e0a89f;
 }
 .topbar {
   height: 4.25rem;
@@ -65,7 +78,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
-  background: #09100fde;
+  background: #f2f0eb;
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -87,6 +100,11 @@ button:disabled {
 .link-button {
   border: 0;
   padding: 0.3rem;
+  background: none;
+  color: var(--muted);
+}
+.link-button:hover {
+  color: var(--ink);
   background: none;
 }
 .page {
@@ -114,17 +132,17 @@ p {
   color: var(--muted);
 }
 .eyebrow {
-  color: var(--lime);
+  color: #a87b00;
   font:
     700 0.72rem ui-monospace,
     monospace;
   letter-spacing: 0.15em;
 }
 .card {
-  background: linear-gradient(145deg, #14211e, #0e1715);
+  background: linear-gradient(145deg, #ffffff, #fdfaf0);
   border: 1px solid var(--line);
   border-radius: 0.85rem;
-  box-shadow: 0 20px 70px #0004;
+  box-shadow: 0 20px 70px #d9cf9f33;
 }
 .session-grid {
   display: grid;
@@ -139,25 +157,25 @@ p {
 }
 .session-card:hover {
   transform: translateY(-3px);
-  border-color: #52655f;
+  border-color: #d8cfae;
 }
 .phase {
   display: inline-flex;
   padding: 0.25rem 0.5rem;
   border-radius: 99px;
-  color: #b9cac4;
-  background: #263431;
+  color: #6b6555;
+  background: #f0ead3;
   font:
     700 0.72rem ui-monospace,
     monospace;
 }
 .phase[data-phase='Running'] {
-  color: #d9ff8b;
-  background: #29421b;
+  color: #3e6b1f;
+  background: #e4f2cf;
 }
 .phase[data-phase='Failed'] {
-  color: #ffaaa3;
-  background: #4b2523;
+  color: #a03830;
+  background: #f9e1de;
 }
 .auth-layout {
   min-height: 100vh;
@@ -185,7 +203,7 @@ p {
 .auth-card label {
   display: grid;
   gap: 0.45rem;
-  color: #b7c5c0;
+  color: #6b6555;
 }
 input {
   width: 100%;
@@ -193,13 +211,16 @@ input {
   border-radius: 0.5rem;
   padding: 0.8rem;
   color: var(--ink);
-  background: #09110f;
+  background: #fffdf6;
+}
+input:focus {
+  border-color: #d8cfae;
 }
 .alert {
   padding: 0.8rem;
-  color: #ffd3cf;
-  background: #3c211f;
-  border: 1px solid #713b37;
+  color: #a03830;
+  background: #fdf1ef;
+  border: 1px solid #ecc6c0;
   border-radius: 0.5rem;
 }
 .status-panel {
@@ -210,14 +231,14 @@ input {
   justify-content: center;
   align-items: center;
   gap: 1rem;
-  border: 1px dashed #3b4b47;
+  border: 1px dashed #d8cfae;
   border-radius: 0.8rem;
   text-align: center;
 }
 .spinner {
   width: 1.5rem;
   height: 1.5rem;
-  border: 2px solid #42544f;
+  border: 2px solid #e0d7ba;
   border-top-color: var(--lime);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -250,6 +271,7 @@ legend {
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 0.65rem;
+  background: #fffdf6;
 }
 .tier input {
   width: auto;
@@ -266,13 +288,27 @@ legend {
   gap: 0.75rem;
   margin-bottom: 1.5rem;
 }
-.conditions {
-  padding: 1.25rem;
+.detail-heading {
   margin-bottom: 1.5rem;
 }
+.detail-heading h1 {
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  letter-spacing: -0.03em;
+}
+.conditions {
+  padding: 0.9rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.conditions h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
 .conditions article {
-  padding: 0.8rem 0;
+  padding: 0.5rem 0;
   border-top: 1px solid var(--line);
+}
+.conditions article p {
+  margin: 0.25rem 0 0;
 }
 .detail-heading .mono,
 .mono {
