@@ -1,4 +1,4 @@
-# 三节点生产集群从零重建
+# 四节点生产集群从零重建
 
 本文适用于没有业务数据、允许丢失 PostgreSQL 和 PVC 的学生项目。不做 etcd、PostgreSQL 或 workspace 数据迁移，而是直接销毁旧 k3s 集群并重建。
 
@@ -8,11 +8,12 @@
 |---|---|---|---|
 | `node-sg-control` | 新加坡本地机，k3s server | `region=sg`, `role=core` | API、gateway、operator、PostgreSQL、cert-manager |
 | `node-hk-worker` | 香港大内存云主机，k3s agent | `region=hk`, `role=worker` | 所有 `AgentSession` |
+| `node-hk-worker-1` | 香港大内存云主机，k3s agent | `region=hk`, `role=worker` | 所有 `AgentSession` |
 | `node-hk-edge` | 香港小内存云主机，k3s agent | `region=hk`, `role=edge` | Traefik、ServiceLB、frontend |
 
 这是单 control plane，不具备 HA。新加坡机故障时整个集群无法管理，但对当前项目规模是可接受的简化。`role=core` 节点不添加 control-plane taint，因为当前 Helm chart 明确要求平台服务和 PostgreSQL 运行在该节点。
 
-建议三台机器均使用 Ubuntu 24.04 LTS x86_64，并使用 SSD。edge 节点理论上 1 GiB 可以启动，但 OS、k3s agent、Traefik 和 frontend 同时运行时容易 OOM，建议至少 2 GiB。
+四台机器均使用 Ubuntu 24.04 LTS x86_64，并使用 SSD。edge 节点理论上 1 GiB 可以启动，但 OS、k3s agent、Traefik 和 frontend 同时运行时容易 OOM，建议至少 2 GiB。
 
 ## 1. 下线旧集群
 
@@ -23,10 +24,9 @@ kubectl config current-context
 kubectl get nodes -o wide
 ```
 
-若旧 server 仍可访问，先删除两个 agent 的 Node 对象。本项目允许数据丢失，不需要 drain 或等待 Pod 迁移：
 
 ```bash
-kubectl delete node node-hk-worker node-hk-edge
+kubectl delete node xxx xxx
 ```
 
 在每台旧 agent 上执行：
@@ -45,9 +45,9 @@ sudo /usr/local/bin/k3s-uninstall.sh
 
 在 Tailscale Admin Console 中移除不再使用的旧设备。Bosun 业务镜像直接使用 Docker Hub，节点不需要 `/etc/rancher/k3s/registries.yaml`；重用装过其他集群的主机时，应先确认没有遗留的自定义 registry 配置。
 
-## 2. 准备三台新主机
+## 2. 准备新主机
 
-在三台机器上都执行：
+在新机器上都执行：
 
 ```bash
 sudo apt-get update
@@ -59,7 +59,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 同时在 `/etc/fstab` 中注释 swap 行，避免重启后重新开启。Docker 不需要安装，k3s 自带 containerd。新加坡本地机必须关闭自动休眠。
 
-依次在三台机器上登录 Tailscale：
+依次在四台机器上登录 Tailscale：
 
 ```bash
 # 新加坡机
@@ -68,11 +68,14 @@ sudo tailscale up --hostname=node-sg-control
 # 香港 worker
 sudo tailscale up --hostname=node-hk-worker
 
+# 另一台香港 worker
+sudo tailscale up --hostname=node-hk-worker-1
+
 # 香港 edge
 sudo tailscale up --hostname=node-hk-edge
 ```
 
-每次只在对应主机执行其中一条。记录三台机的 Tailscale IPv4：
+每次只在对应主机执行其中一条。记录四台机的 Tailscale IPv4：
 
 ```bash
 tailscale ip -4
@@ -87,7 +90,7 @@ Kubernetes 默认的 `ndots:5` 会使 Go resolver 先尝试
 `api.deepseek.com.localdomain` 之类的扩展名。如果上游 DNS 对 `*.localdomain`
 返回了错误地址，cert-manager 和 gateway 会连接到错误主机。
 
-在三台节点上都创建无 search domain 的专用 resolver 文件：
+在四台节点上都创建无 search domain 的专用 resolver 文件：
 
 ```bash
 sudo install -d -m 0755 /etc/rancher/k3s
@@ -101,7 +104,7 @@ printf '%s\n' \
 `*.localdomain` 做通配解析的 resolver。不要在该文件中添加 `search`
 或 `domain` 行。
 
-在三台节点的 `/etc/rancher/k3s/config.yaml` 中都加入以下配置；文件已存在时必须保留其他字段，不要整个覆盖：
+在每台节点的 `/etc/rancher/k3s/config.yaml` 中都加入以下配置；文件已存在时必须保留其他字段，不要整个覆盖：
 
 ```yaml
 resolv-conf: /etc/rancher/k3s/resolv.conf
@@ -120,7 +123,7 @@ sudo systemctl restart k3s-agent
 sudo systemctl restart k3s
 ```
 
-已存在的 Pod 不会自动重建 DNS sandbox。补配完成且三个节点恢复
+已存在的 Pod 不会自动重建 DNS sandbox。补配完成且四个节点恢复
 `Ready` 后，重建 CoreDNS、cert-manager 和 Bosun Deployment：
 
 ```bash
@@ -129,7 +132,7 @@ kubectl rollout restart deployment/cert-manager -n cert-manager
 kubectl rollout restart deployment -n bosun-platform
 ```
 
-使用了自定义 Tailscale ACL 时，要允许三个节点之间的流量。主机开启 UFW 时，可用下列简化规则允许 tailnet 入站：
+使用了自定义 Tailscale ACL 时，要允许四个节点之间的流量。主机开启 UFW 时，可用下列简化规则允许 tailnet 入站：
 
 ```bash
 sudo ufw allow in on tailscale0
@@ -174,7 +177,7 @@ sudo cat /var/lib/rancher/k3s/server/agent-token
 
 ## 4. 加入香港 worker 和 edge
 
-在香港大内存 worker 上执行：
+在香港第一台大内存 worker 上执行：
 
 ```bash
 export CONTROL_TS_IP='<control plane Tailscale IPv4>'
@@ -188,6 +191,27 @@ curl -sfL https://get.k3s.io | sudo env \
   K3S_TOKEN="${K3S_AGENT_TOKEN}" \
   sh -s - agent \
   --node-name node-hk-worker \
+  --node-ip "${WORKER_TS_IP}" \
+  --flannel-iface tailscale0 \
+  --node-label region=hk \
+  --node-label role=worker
+unset K3S_AGENT_TOKEN
+```
+
+在香港第二台大内存 worker 上执行：
+
+```bash
+export CONTROL_TS_IP='<control plane Tailscale IPv4>'
+export K3S_VERSION='<K3S_VERSION>'
+read -rsp 'K3s agent token: ' K3S_AGENT_TOKEN
+echo
+WORKER_TS_IP="$(tailscale ip -4)"
+curl -sfL https://get.k3s.io | sudo env \
+  INSTALL_K3S_VERSION="${K3S_VERSION}" \
+  K3S_URL="https://${CONTROL_TS_IP}:6443" \
+  K3S_TOKEN="${K3S_AGENT_TOKEN}" \
+  sh -s - agent \
+  --node-name node-hk-worker-1 \
   --node-ip "${WORKER_TS_IP}" \
   --flannel-iface tailscale0 \
   --node-label region=hk \
@@ -228,7 +252,7 @@ sudo k3s kubectl get nodes \
   -o custom-columns=NAME:.metadata.name,INTERNAL-IP:.status.addresses[0].address,REGION:.metadata.labels.region,ROLE:.metadata.labels.role,TAINTS:.spec.taints
 ```
 
-期望只有三个 `Ready` 节点，且它们的 `INTERNAL-IP` 是 Tailscale IP。
+期望只有四个 `Ready` 节点，且它们的 `INTERNAL-IP` 是 Tailscale IP。
 
 部署出 frontend 后，确认 Pod 已使用新 resolver。`search` 行中不应再出现
 `localdomain` 或 Tailscale MagicDNS domain，外部域名也不应解析成
@@ -332,7 +356,7 @@ curl -fsS https://bosun.amsors.com/healthz
 
 验收标准：
 
-- 三个节点全部 `Ready`；
+- 节点全部 `Ready`；
 - ServiceLB label 只出现在 `node-hk-edge`；
 - Traefik 和 frontend 在 edge；
 - PostgreSQL、API、gateway、operator 和 cert-manager 在 core；
