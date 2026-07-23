@@ -175,6 +175,7 @@ jobs:
               --dry-run=client \
               --output yaml |
             kubectl apply --filename -
+          deploy/scripts/apply-crds.sh
           helm upgrade --install bosun deploy/chart \
             --namespace bosun-platform \
             --create-namespace \
