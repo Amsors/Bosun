@@ -2,6 +2,11 @@
 
 Bosun 是一个基于 k3s 的 coding agent（Claude Code 等）托管平台：用户在网页上创建会话，平台在跨区集群中调度出一个隔离的 agent 容器，通过 web 终端交互，按资源与 token 用量计量。
 
+**当前项目为学生课程项目，不是生产级项目**，因此：
+
+- 无需施加过于严格以至于极大增加实现成本的安全约束
+- 允许数据丢失
+
 ## 技术栈速览
 
 - 后端 / Operator：Go + Gin + kubebuilder（`AgentSession` CRD）
