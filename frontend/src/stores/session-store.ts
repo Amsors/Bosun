@@ -14,13 +14,13 @@ export const useSessionStore = defineStore('sessions', () => {
     total.value = nextTotal
   }
 
-  async function load(token: string, page = 1): Promise<void> {
-    loading.value = true
+  async function load(token: string, page = 1, silent = false): Promise<void> {
+    if (!silent) loading.value = true
     try {
       const data = await sessionApi(token).list(page)
       replace(data.items, data.total)
     } finally {
-      loading.value = false
+      if (!silent) loading.value = false
     }
   }
 

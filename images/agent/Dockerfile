@@ -40,6 +40,7 @@ COPY --chmod=0755 entrypoint.sh /usr/local/bin/bosun-entrypoint
 COPY --chmod=0755 shell-supervisor.sh /usr/local/bin/bosun-shell-supervisor
 COPY --chmod=0755 runtime-control.sh /usr/local/bin/bosun-runtime-control
 COPY --chmod=0755 hooks/session-start.sh /usr/local/lib/bosun/hooks/session-start
+COPY --chmod=0755 hooks/agent-state.sh /usr/local/lib/bosun/hooks/agent-state
 COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.json
 COPY --chmod=0444 recovery.schema.json /usr/local/share/bosun/recovery.schema.json
 

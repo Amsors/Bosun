@@ -26,7 +26,8 @@ func TestCreateValidatesEnvironmentAndCapacity(t *testing.T) {
 	}{
 		{name: "pending environment", phase: "Pending", want: ErrEnvironmentReady},
 		{name: "failed environment", phase: "Failed", want: ErrEnvironmentFailed},
-		{name: "active capacity", phase: "Ready", active: 1, want: ErrCapacity},
+		{name: "third active session", phase: "Ready", active: MaxActiveSessionsPerUser - 1},
+		{name: "active capacity", phase: "Ready", active: MaxActiveSessionsPerUser, want: ErrCapacity},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,6 +38,30 @@ func TestCreateValidatesEnvironmentAndCapacity(t *testing.T) {
 				idempotency.RequestHash("POST", "/api/v1/sessions", []byte("body")), validRequest())
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Create() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidCreateRequestRequiresUsefulName(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*CreateRequest)
+		ok   bool
+	}{
+		{name: "normal", ok: true},
+		{name: "trimmed", edit: func(req *CreateRequest) { req.Name = "  课程项目  " }, ok: true},
+		{name: "blank", edit: func(req *CreateRequest) { req.Name = " \t " }},
+		{name: "too long", edit: func(req *CreateRequest) { req.Name = string(make([]rune, 81)) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := validRequest()
+			if tt.edit != nil {
+				tt.edit(&req)
+			}
+			if got := validCreateRequest(req); got != tt.ok {
+				t.Fatalf("validCreateRequest() = %v, want %v", got, tt.ok)
 			}
 		})
 	}
@@ -410,7 +435,7 @@ func (m *idempotentMemoryStore) CreateWithEventAndIdempotency(ctx context.Contex
 
 func validRequest() CreateRequest {
 	return CreateRequest{
-		Tier: "small", Runtime: "claude-code",
+		Name: "测试会话", Tier: "small", Runtime: "claude-code",
 		Provider: ProviderRequest{Mode: "platform"}, StoragePolicy: "local",
 	}
 }
@@ -420,7 +445,7 @@ func testSession(userID uuid.UUID) Session {
 	nonce, _ := uuid.NewV7()
 	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
 	return Session{
-		ID: id, UserID: userID, CRNamespace: "bosun-u-test", CRName: "sess-test",
+		ID: id, UserID: userID, Name: "测试会话", CRNamespace: "bosun-u-test", CRName: "sess-test",
 		Tier: "small", Runtime: "claude-code", Provider: Provider{Mode: "platform"},
 		StoragePolicy: "local", DesiredState: "Running", ResumeNonce: nonce,
 		Phase: "Pending", CreatedAt: now, UpdatedAt: now, Version: 1,

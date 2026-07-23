@@ -447,13 +447,22 @@ func newAgentSessionReconciler() *AgentSessionReconciler {
 		AgentPullPolicy:  corev1.PullAlways,
 		StorageClassName: "local-path", GatewayURL: "http://bosun-gateway:8081",
 		EgressProxyURL: "http://bosun-egress-proxy:3128", IdleScanInterval: time.Millisecond,
-		Quiescer: &fakeAgentQuiescer{},
+		Quiescer: &fakeAgentQuiescer{}, StateReader: &fakeAgentStateReader{},
 	}
 }
 
 type fakeAgentQuiescer struct {
 	err   error
 	calls int
+}
+
+type fakeAgentStateReader struct {
+	state AgentWorkState
+	err   error
+}
+
+func (r *fakeAgentStateReader) ReadState(_ context.Context, _ *corev1.Pod) (AgentWorkState, error) {
+	return r.state, r.err
 }
 
 func (q *fakeAgentQuiescer) Quiesce(_ context.Context, pod *corev1.Pod) (QuiesceResult, error) {

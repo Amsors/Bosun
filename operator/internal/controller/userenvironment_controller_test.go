@@ -100,10 +100,10 @@ func TestUserEnvironmentReconcileCreatesSecurityBaselineAndIsIdempotent(t *testi
 	getObject(t, namespacedName(environment.Spec.Namespace, resourceQuotaName), &quota)
 	assertManagedObject(t, &quota, environment)
 	wantQuota := corev1.ResourceList{
-		corev1.ResourcePods:            resource.MustParse("2"),
-		corev1.ResourceLimitsCPU:       resource.MustParse("2"),
-		corev1.ResourceLimitsMemory:    resource.MustParse("3Gi"),
-		corev1.ResourceRequestsStorage: resource.MustParse("15Gi"),
+		corev1.ResourcePods:            resource.MustParse("3"),
+		corev1.ResourceLimitsCPU:       resource.MustParse("3"),
+		corev1.ResourceLimitsMemory:    resource.MustParse("6Gi"),
+		corev1.ResourceRequestsStorage: resource.MustParse("30Gi"),
 	}
 	assertResourceListEqual(t, quota.Spec.Hard, wantQuota)
 

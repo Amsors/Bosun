@@ -63,6 +63,7 @@ type AgentSessionReconciler struct {
 	IdleScanInterval time.Duration
 	Now              func() time.Time
 	Quiescer         AgentQuiescer
+	StateReader      AgentStateReader
 }
 
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions,verbs=get;list;watch
@@ -226,9 +227,23 @@ func (r *AgentSessionReconciler) reconcileRunning(
 		return ctrl.Result{RequeueAfter: r.idleScan()}, nil
 	}
 
+	workState := AgentWorkStateUnknown
+	if r.StateReader != nil {
+		current, stateErr := r.StateReader.ReadState(ctx, pod)
+		if stateErr != nil {
+			logf.FromContext(ctx).Error(stateErr, "Could not read Agent work state", "pod", pod.Name)
+		} else {
+			workState = current
+		}
+	}
 	activity := sessionActivity(session, pod.CreationTimestamp.Time)
 	now := r.now()
 	idle := now.Sub(activity) >= time.Duration(session.Spec.IdleTimeoutSeconds)*time.Second
+	if workState == AgentWorkStateWorking ||
+		workState == AgentWorkStateAwaitingApproval ||
+		workState == AgentWorkStateAwaitingChoice {
+		idle = false
+	}
 	if idle && session.Status.Phase == bosunv1alpha1.AgentSessionPhaseRunning {
 		if err := r.setStatus(ctx, key, session.Generation, func(status *bosunv1alpha1.AgentSessionStatus) {
 			status.Phase = bosunv1alpha1.AgentSessionPhaseIdle
@@ -262,11 +277,29 @@ func (r *AgentSessionReconciler) reconcileRunning(
 			status.RuntimeCheckpoint.State = bosunv1alpha1.RuntimeCheckpointStateConsumed
 		}
 		clearRetryCondition(status)
-		setSessionCondition(status, session.Generation, metav1.ConditionTrue, "SessionRunning", "Agent Pod and persistent terminal are ready")
+		reason, message := agentWorkCondition(workState)
+		setSessionCondition(status, session.Generation, metav1.ConditionTrue, reason, message)
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: r.idleScan()}, nil
+}
+
+func agentWorkCondition(state AgentWorkState) (string, string) {
+	switch state {
+	case AgentWorkStateWorking:
+		return "AgentWorking", "Claude is working; no user action is currently required"
+	case AgentWorkStateAwaitingApproval:
+		return "AwaitingApproval", "Claude is waiting for the user to approve an action"
+	case AgentWorkStateAwaitingChoice:
+		return "AwaitingChoice", "Claude is waiting for the user to choose the next step"
+	case AgentWorkStateAwaitingInput:
+		return "AwaitingInput", "Claude has finished the current turn and is waiting for user input"
+	case AgentWorkStateStopped:
+		return "AgentStopped", "Claude is not running; the terminal remains available"
+	default:
+		return "SessionRunning", "Agent Pod and persistent terminal are ready"
+	}
 }
 
 func (r *AgentSessionReconciler) reconcileHibernate(

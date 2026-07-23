@@ -9,6 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const MaxActiveSessionsPerUser int64 = 3
+
 var (
 	ErrNotFound          = errors.New("session not found")
 	ErrInvalidTransition = errors.New("invalid session transition")
@@ -28,6 +30,7 @@ type Provider struct {
 type Session struct {
 	ID                uuid.UUID
 	UserID            uuid.UUID
+	Name              string
 	CRNamespace       string
 	CRName            string
 	Tier              string
@@ -48,6 +51,7 @@ type Session struct {
 }
 
 type CreateRequest struct {
+	Name          string          `json:"name"`
 	Tier          string          `json:"tier"`
 	Runtime       string          `json:"runtime"`
 	Provider      ProviderRequest `json:"provider"`

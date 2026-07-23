@@ -47,6 +47,21 @@ type AgentQuiescer interface {
 	Quiesce(context.Context, *corev1.Pod) (QuiesceResult, error)
 }
 
+type AgentWorkState string
+
+const (
+	AgentWorkStateUnknown          AgentWorkState = ""
+	AgentWorkStateWorking          AgentWorkState = "working"
+	AgentWorkStateAwaitingApproval AgentWorkState = "awaiting_approval"
+	AgentWorkStateAwaitingChoice   AgentWorkState = "awaiting_choice"
+	AgentWorkStateAwaitingInput    AgentWorkState = "awaiting_input"
+	AgentWorkStateStopped          AgentWorkState = "stopped"
+)
+
+type AgentStateReader interface {
+	ReadState(context.Context, *corev1.Pod) (AgentWorkState, error)
+}
+
 type KubernetesQuiescer struct {
 	config *rest.Config
 	core   kubernetes.Interface
@@ -107,6 +122,43 @@ func (q *KubernetesQuiescer) Quiesce(ctx context.Context, pod *corev1.Pod) (Quie
 		CreatedAt: createdAt.UTC(), SizeBytes: response.SizeBytes, SHA256: response.SHA256,
 		AgentImageDigest: response.AgentImageDigest,
 	}, nil
+}
+
+func (q *KubernetesQuiescer) ReadState(ctx context.Context, pod *corev1.Pod) (AgentWorkState, error) {
+	if pod == nil || pod.Namespace == "" || pod.Name == "" {
+		return AgentWorkStateUnknown, fmt.Errorf("agent Pod identity is required")
+	}
+	request := q.core.CoreV1().RESTClient().Post().
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: agentContainerName,
+			Command: []string{
+				"/bin/bash", "-c",
+				"cat /workspace/.bosun-state/agent-status 2>/dev/null || true",
+			},
+			Stdout: true,
+			Stderr: true,
+		}, scheme.ParameterCodec)
+	executor, err := remotecommand.NewSPDYExecutor(q.config, "POST", request.URL())
+	if err != nil {
+		return AgentWorkStateUnknown, fmt.Errorf("create agent state executor: %w", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
+		return AgentWorkStateUnknown, fmt.Errorf("read agent state: %w (%s)", err, stableQuiesceError(stderr.String()))
+	}
+	state := AgentWorkState(strings.TrimSpace(stdout.String()))
+	switch state {
+	case AgentWorkStateUnknown, AgentWorkStateWorking, AgentWorkStateAwaitingApproval,
+		AgentWorkStateAwaitingChoice, AgentWorkStateAwaitingInput, AgentWorkStateStopped:
+		return state, nil
+	default:
+		return AgentWorkStateUnknown, fmt.Errorf("agent returned invalid work state")
+	}
 }
 
 func podAgentImageDigest(pod *corev1.Pod) string {

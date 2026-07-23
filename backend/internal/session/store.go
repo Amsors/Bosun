@@ -56,7 +56,7 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 	if err != nil {
 		return fmt.Errorf("recheck active session capacity: %w", err)
 	}
-	if active >= 1 {
+	if active >= MaxActiveSessionsPerUser {
 		return ErrCapacity
 	}
 	conditions, err := json.Marshal(session.Conditions)
@@ -72,6 +72,12 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 		CreatedAt: session.CreatedAt,
 	}); err != nil {
 		return fmt.Errorf("insert session: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		"UPDATE bosun.sessions SET display_name = $2 WHERE id = $1",
+		session.ID, session.Name,
+	); err != nil {
+		return fmt.Errorf("set session display name: %w", err)
 	}
 	if err := insertEvent(ctx, qtx, event); err != nil {
 		return err
@@ -109,7 +115,11 @@ func (s *PgxStore) Get(ctx context.Context, userID, sessionID uuid.UUID) (Sessio
 	if err != nil {
 		return Session{}, fmt.Errorf("get session: %w", err)
 	}
-	return sessionFromRow(row)
+	rec, err := sessionFromRow(row)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.attachName(ctx, rec)
 }
 
 // GetByID returns a session regardless of owner so terminal authorization can
@@ -122,7 +132,11 @@ func (s *PgxStore) GetByID(ctx context.Context, sessionID uuid.UUID) (Session, e
 	if err != nil {
 		return Session{}, fmt.Errorf("get session by ID: %w", err)
 	}
-	return sessionFromRow(row)
+	rec, err := sessionFromRow(row)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.attachName(ctx, rec)
 }
 
 func (s *PgxStore) List(ctx context.Context, userID uuid.UUID, limit, offset int32) (Page, error) {
@@ -139,6 +153,9 @@ func (s *PgxStore) List(ctx context.Context, userID uuid.UUID, limit, offset int
 			return Page{}, err
 		}
 		items = append(items, item)
+	}
+	if err := s.attachNames(ctx, items); err != nil {
+		return Page{}, err
 	}
 	total, err := s.q.CountSessionsForUser(ctx, userID)
 	if err != nil {
@@ -171,7 +188,11 @@ func (s *PgxStore) UpdateDesired(ctx context.Context, session Session, event Eve
 	if err := tx.Commit(ctx); err != nil {
 		return Session{}, fmt.Errorf("commit desired state transaction: %w", err)
 	}
-	return sessionFromRow(row)
+	rec, err := sessionFromRow(row)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.attachName(ctx, rec)
 }
 
 func (s *PgxStore) SoftDelete(ctx context.Context, userID, sessionID uuid.UUID, event Event) (Session, error) {
@@ -197,7 +218,11 @@ func (s *PgxStore) SoftDelete(ctx context.Context, userID, sessionID uuid.UUID, 
 	if err := tx.Commit(ctx); err != nil {
 		return Session{}, fmt.Errorf("commit delete session transaction: %w", err)
 	}
-	return sessionFromRow(row)
+	rec, err := sessionFromRow(row)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.attachName(ctx, rec)
 }
 
 func (s *PgxStore) Project(ctx context.Context, projection Projection, event Event) (bool, error) {
@@ -307,4 +332,50 @@ func sessionsFromRows(rows []db.BosunSession) ([]Session, error) {
 		sessions = append(sessions, item)
 	}
 	return sessions, nil
+}
+
+func (s *PgxStore) attachName(ctx context.Context, rec Session) (Session, error) {
+	if err := s.pool.QueryRow(
+		ctx,
+		"SELECT display_name FROM bosun.sessions WHERE id = $1",
+		rec.ID,
+	).Scan(&rec.Name); err != nil {
+		return Session{}, fmt.Errorf("read session display name: %w", err)
+	}
+	return rec, nil
+}
+
+func (s *PgxStore) attachNames(ctx context.Context, sessions []Session) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(sessions))
+	index := make(map[uuid.UUID]int, len(sessions))
+	for i := range sessions {
+		ids = append(ids, sessions[i].ID)
+		index[sessions[i].ID] = i
+	}
+	rows, err := s.pool.Query(
+		ctx,
+		"SELECT id, display_name FROM bosun.sessions WHERE id = ANY($1::uuid[])",
+		ids,
+	)
+	if err != nil {
+		return fmt.Errorf("list session display names: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return fmt.Errorf("scan session display name: %w", err)
+		}
+		if i, ok := index[id]; ok {
+			sessions[i].Name = name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate session display names: %w", err)
+	}
+	return nil
 }

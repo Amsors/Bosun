@@ -79,6 +79,7 @@ export interface ProviderSelection {
 }
 
 export interface CreateSessionRequest {
+  name: string
   tier: SessionTier
   runtime: Runtime
   provider: ProviderSelection
@@ -87,6 +88,7 @@ export interface CreateSessionRequest {
 
 export interface Session {
   id: UUID
+  name: string
   desiredState: DesiredState
   tier: SessionTier
   runtime: Runtime

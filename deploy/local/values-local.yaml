@@ -7,6 +7,7 @@ database:
 
 agent:
   imagePullPolicy: Always
+  idleScanInterval: 5s
 
 auth:
   trustedProxyHeader: ""

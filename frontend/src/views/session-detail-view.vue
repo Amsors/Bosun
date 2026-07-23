@@ -18,6 +18,32 @@ const error = ref('')
 const actionBusy = ref(false)
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 const id = computed(() => String(route.params.id))
+const userStatus = computed(() => {
+  switch (session.value?.phaseReason) {
+    case 'AgentWorking':
+      return { label: 'AI 工作中', message: 'Claude 正在执行任务，暂时无需操作。', kind: 'working' }
+    case 'AwaitingApproval':
+      return {
+        label: '等待批准',
+        message: 'Claude 正在等待你批准一项操作，请查看下方终端。',
+        kind: 'attention',
+      }
+    case 'AwaitingChoice':
+      return {
+        label: '等待选择',
+        message: 'Claude 正在等待你选择下一步方案，请查看下方终端。',
+        kind: 'attention',
+      }
+    case 'AwaitingInput':
+      return {
+        label: '等待指令',
+        message: 'Claude 已完成当前回复，正在等待你的下一步指令。',
+        kind: 'attention',
+      }
+    default:
+      return { label: session.value?.phase || '', message: '', kind: 'normal' }
+  }
+})
 
 async function load(): Promise<void> {
   if (!auth.accessToken) return
@@ -76,11 +102,17 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
       <div class="page-heading detail-heading">
         <div>
           <p class="eyebrow">SESSION</p>
-          <h1>{{ session.runtime }}</h1>
+          <h1>{{ session.name }}</h1>
+          <p>{{ session.runtime }} · {{ session.tier === 'medium' ? 'Medium' : 'Small' }}</p>
           <p class="mono">{{ session.id }}</p>
         </div>
-        <span class="phase" :data-phase="session.phase">{{ session.phase }}</span>
+        <span class="phase" :data-phase="session.phase" :data-user-state="userStatus.kind">{{
+          userStatus.label
+        }}</span>
       </div>
+      <p v-if="userStatus.message" class="agent-status-note" :data-kind="userStatus.kind">
+        {{ userStatus.message }}
+      </p>
       <p v-if="error" class="alert" role="alert">{{ error }}</p>
       <div class="action-row">
         <button
@@ -114,6 +146,24 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
           永久删除
         </button>
       </div>
+      <section class="session-facts" aria-label="会话信息">
+        <div>
+          <span>当前状态</span>
+          <strong>{{ userStatus.label }}</strong>
+        </div>
+        <div>
+          <span>创建时间</span>
+          <strong>{{ new Date(session.createdAt).toLocaleString('zh-CN') }}</strong>
+        </div>
+        <div>
+          <span>最近活动</span>
+          <strong>{{
+            session.lastActiveAt
+              ? new Date(session.lastActiveAt).toLocaleString('zh-CN')
+              : '尚无活动'
+          }}</strong>
+        </div>
+      </section>
       <section v-if="session.conditions.length" class="card conditions">
         <h2>状态详情</h2>
         <article
