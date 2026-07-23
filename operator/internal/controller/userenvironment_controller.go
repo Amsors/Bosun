@@ -208,10 +208,10 @@ func (r *UserEnvironmentReconciler) ensureBaseline(
 	if err := r.createOrUpdateOwned(ctx, environment, quota, func() error {
 		quota.Spec = corev1.ResourceQuotaSpec{
 			Hard: corev1.ResourceList{
-				corev1.ResourcePods:            resource.MustParse("3"),
-				corev1.ResourceLimitsCPU:       resource.MustParse("3"),
-				corev1.ResourceLimitsMemory:    resource.MustParse("6Gi"),
-				corev1.ResourceRequestsStorage: resource.MustParse("30Gi"),
+				corev1.ResourcePods:            resource.MustParse("20"),
+				corev1.ResourceLimitsCPU:       resource.MustParse("20"),
+				corev1.ResourceLimitsMemory:    resource.MustParse("40Gi"),
+				corev1.ResourceRequestsStorage: resource.MustParse("200Gi"),
 			},
 		}
 		return nil

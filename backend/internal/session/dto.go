@@ -9,6 +9,7 @@ import (
 type DTO struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`
+	Priority      string             `json:"priority"`
 	DesiredState  string             `json:"desiredState"`
 	Tier          string             `json:"tier"`
 	Runtime       string             `json:"runtime"`
@@ -36,7 +37,8 @@ func toDTO(rec Session) DTO {
 		conditions = make([]metav1.Condition, 0)
 	}
 	dto := DTO{
-		ID: rec.ID.String(), Name: rec.Name, DesiredState: rec.DesiredState, Tier: rec.Tier, Runtime: rec.Runtime,
+		ID: rec.ID.String(), Name: rec.Name, Priority: rec.Priority,
+		DesiredState: rec.DesiredState, Tier: rec.Tier, Runtime: rec.Runtime,
 		Provider: ProviderDTO{Mode: rec.Provider.Mode}, StoragePolicy: rec.StoragePolicy,
 		Phase: rec.Phase, PhaseReason: rec.PhaseReason, Conditions: conditions,
 		CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),

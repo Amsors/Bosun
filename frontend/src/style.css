@@ -151,7 +151,7 @@ p {
 }
 .session-summary {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
@@ -258,6 +258,11 @@ p {
   background: #72a9d6;
   box-shadow: 0 0 0 5px #e1eff9;
 }
+.phase-dot[data-user-state='queued'] {
+  border-color: #c99a28;
+  background: #e1b447;
+  box-shadow: 0 0 0 5px #f8edc7;
+}
 .phase-dot[data-user-state='attention'] {
   border-color: #c2453a;
   background: #d76358;
@@ -293,6 +298,10 @@ p {
   color: #285f8e;
   background: #e1eff9;
 }
+.phase[data-user-state='queued'] {
+  color: #8d6508;
+  background: #f8edc7;
+}
 .phase[data-user-state='attention'] {
   color: #a03830;
   background: #f9e1de;
@@ -309,6 +318,11 @@ p {
   color: #a03830;
   border-color: #ecc6c0;
   background: #fdf1ef;
+}
+.agent-status-note[data-kind='queued'] {
+  color: #765507;
+  border-color: #e8d187;
+  background: #fff8de;
 }
 .auth-layout {
   min-height: 100vh;
@@ -396,6 +410,9 @@ input:focus {
 .create-form {
   padding: 1.5rem;
 }
+.create-form fieldset + fieldset {
+  margin-top: 1.5rem;
+}
 .field-label {
   margin-bottom: 0.45rem;
   display: flex;
@@ -439,6 +456,11 @@ legend {
 .tier small {
   color: var(--muted);
 }
+.priority-option:has(input:checked) {
+  border-color: #d9aa31;
+  background: #fff9df;
+  box-shadow: 0 0 0 3px #f4e4a5;
+}
 .action-row {
   display: flex;
   gap: 0.75rem;
@@ -458,7 +480,7 @@ legend {
 .session-facts {
   margin-bottom: 1.5rem;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
 }
 .session-facts > div {

@@ -289,11 +289,22 @@ deploy_chart() {
   ensure_local_context
   ensure_images_present
   ensure_platform_secrets
+  # Helm installs files under crds/ only on the first release and deliberately
+  # skips CRD upgrades. Apply them explicitly so local schema changes are not
+  # left behind when application images are rebuilt.
+  kubectl apply --filename "${root}/deploy/chart/crds" >/dev/null
   local tag
   tag="$(image_tag)"
   local provider_name="${BOSUN_DEV_PROVIDER_NAME:-platform-default}"
   local provider_header="${BOSUN_DEV_PROVIDER_AUTH_HEADER:-x-api-key}"
   local provider_scheme="${BOSUN_DEV_PROVIDER_AUTH_SCHEME:-}"
+  local helm_conflict_args=()
+  # Helm 4 uses server-side apply. Component builds intentionally use
+  # kubectl set/patch for fast local rollouts, so Helm must reclaim those
+  # chart-owned fields on the next full deployment. Keep Helm 3 compatible.
+  if helm upgrade --help | grep -q -- '--force-conflicts'; then
+    helm_conflict_args+=(--force-conflicts)
+  fi
 
   "${root}/deploy/scripts/apply-crds.sh"
   echo "installing Bosun and waiting up to 10m for all workloads to become ready"
@@ -307,6 +318,7 @@ deploy_chart() {
     --set-string "gateway.upstreamURL=${BOSUN_DEV_PROVIDER_URL}" \
     --set-string "gateway.upstreamAuthHeader=${provider_header}" \
     --set-string "gateway.upstreamAuthScheme=${provider_scheme}" \
+    "${helm_conflict_args[@]}" \
     --rollback-on-failure \
     --wait \
     --timeout 10m

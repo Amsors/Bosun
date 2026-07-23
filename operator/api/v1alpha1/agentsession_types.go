@@ -109,8 +109,8 @@ type AgentSessionSpec struct {
 	// +kubebuilder:default=28800
 	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds"`
 
-	// +kubebuilder:validation:Enum=bosun-free
-	// +kubebuilder:default=bosun-free
+	// +kubebuilder:validation:Enum=bosun-free;bosun-normal;bosun-high
+	// +kubebuilder:default=bosun-normal
 	PriorityClassName string `json:"priorityClassName"`
 }
 

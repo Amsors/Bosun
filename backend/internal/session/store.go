@@ -16,7 +16,7 @@ import (
 
 type Store interface {
 	CreateWithEventAndIdempotency(context.Context, Session, Event, IdempotencyInput) error
-	CountActive(context.Context, uuid.UUID) (int64, error)
+	CountTotal(context.Context, uuid.UUID) (int64, error)
 	Get(context.Context, uuid.UUID, uuid.UUID) (Session, error)
 	GetByID(context.Context, uuid.UUID) (Session, error)
 	List(context.Context, uuid.UUID, int32, int32) (Page, error)
@@ -52,11 +52,11 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()+":active-session"); err != nil {
 		return fmt.Errorf("lock active session capacity: %w", err)
 	}
-	active, err := qtx.CountActiveSessionsForUser(ctx, session.UserID)
+	total, err := qtx.CountSessionsForUser(ctx, session.UserID)
 	if err != nil {
-		return fmt.Errorf("recheck active session capacity: %w", err)
+		return fmt.Errorf("recheck session capacity: %w", err)
 	}
-	if active >= MaxActiveSessionsPerUser {
+	if total >= MaxSessionsPerUser {
 		return ErrCapacity
 	}
 	conditions, err := json.Marshal(session.Conditions)
@@ -65,6 +65,7 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 	}
 	if _, err := qtx.CreateSession(ctx, db.CreateSessionParams{
 		ID: session.ID, UserID: session.UserID, CrNamespace: session.CRNamespace, CrName: session.CRName,
+		DisplayName: session.Name, Priority: session.Priority,
 		Tier: session.Tier, Runtime: session.Runtime, ProviderMode: session.Provider.Mode,
 		ProviderCredentialID: session.Provider.CredentialID, StoragePolicy: session.StoragePolicy,
 		DesiredState: session.DesiredState, ResumeNonce: session.ResumeNonce, Phase: session.Phase,
@@ -72,12 +73,6 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 		CreatedAt: session.CreatedAt,
 	}); err != nil {
 		return fmt.Errorf("insert session: %w", err)
-	}
-	if _, err := tx.Exec(ctx,
-		"UPDATE bosun.sessions SET display_name = $2 WHERE id = $1",
-		session.ID, session.Name,
-	); err != nil {
-		return fmt.Errorf("set session display name: %w", err)
 	}
 	if err := insertEvent(ctx, qtx, event); err != nil {
 		return err
@@ -99,10 +94,10 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 	return nil
 }
 
-func (s *PgxStore) CountActive(ctx context.Context, userID uuid.UUID) (int64, error) {
-	count, err := s.q.CountActiveSessionsForUser(ctx, userID)
+func (s *PgxStore) CountTotal(ctx context.Context, userID uuid.UUID) (int64, error) {
+	count, err := s.q.CountSessionsForUser(ctx, userID)
 	if err != nil {
-		return 0, fmt.Errorf("count active sessions: %w", err)
+		return 0, fmt.Errorf("count sessions: %w", err)
 	}
 	return count, nil
 }
@@ -119,7 +114,7 @@ func (s *PgxStore) Get(ctx context.Context, userID, sessionID uuid.UUID) (Sessio
 	if err != nil {
 		return Session{}, err
 	}
-	return s.attachName(ctx, rec)
+	return rec, nil
 }
 
 // GetByID returns a session regardless of owner so terminal authorization can
@@ -136,7 +131,7 @@ func (s *PgxStore) GetByID(ctx context.Context, sessionID uuid.UUID) (Session, e
 	if err != nil {
 		return Session{}, err
 	}
-	return s.attachName(ctx, rec)
+	return rec, nil
 }
 
 func (s *PgxStore) List(ctx context.Context, userID uuid.UUID, limit, offset int32) (Page, error) {
@@ -153,9 +148,6 @@ func (s *PgxStore) List(ctx context.Context, userID uuid.UUID, limit, offset int
 			return Page{}, err
 		}
 		items = append(items, item)
-	}
-	if err := s.attachNames(ctx, items); err != nil {
-		return Page{}, err
 	}
 	total, err := s.q.CountSessionsForUser(ctx, userID)
 	if err != nil {
@@ -192,7 +184,7 @@ func (s *PgxStore) UpdateDesired(ctx context.Context, session Session, event Eve
 	if err != nil {
 		return Session{}, err
 	}
-	return s.attachName(ctx, rec)
+	return rec, nil
 }
 
 func (s *PgxStore) SoftDelete(ctx context.Context, userID, sessionID uuid.UUID, event Event) (Session, error) {
@@ -222,7 +214,7 @@ func (s *PgxStore) SoftDelete(ctx context.Context, userID, sessionID uuid.UUID, 
 	if err != nil {
 		return Session{}, err
 	}
-	return s.attachName(ctx, rec)
+	return rec, nil
 }
 
 func (s *PgxStore) Project(ctx context.Context, projection Projection, event Event) (bool, error) {
@@ -313,7 +305,8 @@ func sessionFromRow(row db.BosunSession) (Session, error) {
 		return Session{}, fmt.Errorf("decode session %s conditions: %w", row.ID, err)
 	}
 	return Session{
-		ID: row.ID, UserID: row.UserID, CRNamespace: row.CrNamespace, CRName: row.CrName,
+		ID: row.ID, UserID: row.UserID, Name: row.DisplayName, Priority: row.Priority,
+		CRNamespace: row.CrNamespace, CRName: row.CrName,
 		Tier: row.Tier, Runtime: row.Runtime, Provider: Provider{Mode: row.ProviderMode, CredentialID: row.ProviderCredentialID},
 		StoragePolicy: row.StoragePolicy, DesiredState: row.DesiredState, ResumeNonce: row.ResumeNonce,
 		Phase: row.Phase, PhaseReason: row.PhaseReason, Conditions: conditions,
@@ -332,50 +325,4 @@ func sessionsFromRows(rows []db.BosunSession) ([]Session, error) {
 		sessions = append(sessions, item)
 	}
 	return sessions, nil
-}
-
-func (s *PgxStore) attachName(ctx context.Context, rec Session) (Session, error) {
-	if err := s.pool.QueryRow(
-		ctx,
-		"SELECT display_name FROM bosun.sessions WHERE id = $1",
-		rec.ID,
-	).Scan(&rec.Name); err != nil {
-		return Session{}, fmt.Errorf("read session display name: %w", err)
-	}
-	return rec, nil
-}
-
-func (s *PgxStore) attachNames(ctx context.Context, sessions []Session) error {
-	if len(sessions) == 0 {
-		return nil
-	}
-	ids := make([]uuid.UUID, 0, len(sessions))
-	index := make(map[uuid.UUID]int, len(sessions))
-	for i := range sessions {
-		ids = append(ids, sessions[i].ID)
-		index[sessions[i].ID] = i
-	}
-	rows, err := s.pool.Query(
-		ctx,
-		"SELECT id, display_name FROM bosun.sessions WHERE id = ANY($1::uuid[])",
-		ids,
-	)
-	if err != nil {
-		return fmt.Errorf("list session display names: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id uuid.UUID
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return fmt.Errorf("scan session display name: %w", err)
-		}
-		if i, ok := index[id]; ok {
-			sessions[i].Name = name
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate session display names: %w", err)
-	}
-	return nil
 }

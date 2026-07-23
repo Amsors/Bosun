@@ -54,6 +54,8 @@ type BosunSession struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 	DeletedAt            *time.Time `json:"deleted_at"`
 	Version              int64      `json:"version"`
+	DisplayName          string     `json:"display_name"`
+	Priority             string     `json:"priority"`
 }
 
 type BosunSessionEvent struct {

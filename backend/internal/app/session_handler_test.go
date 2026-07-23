@@ -24,7 +24,7 @@ func TestSessionRoutesCreateListTransitionsAndDestructiveDelete(t *testing.T) {
 		"Idempotency-Key": "session-key",
 	}
 	create := doJSON(t, router, http.MethodPost, "/api/v1/sessions",
-		`{"name":"课程项目","tier":"small","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}`,
+		`{"name":"课程项目","priority":"high","tier":"small","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}`,
 		headers,
 	)
 	if create.Code != http.StatusAccepted {
@@ -96,7 +96,8 @@ func (f *fakeSessionService) ensureRecord(userID uuid.UUID) session.Session {
 		id, _ := uuid.NewV7()
 		nonce, _ := uuid.NewV7()
 		f.rec = session.Session{
-			ID: id, UserID: userID, Name: "课程项目", Tier: "small", Runtime: "claude-code",
+			ID: id, UserID: userID, Name: "课程项目", Priority: "high",
+			Tier: "small", Runtime: "claude-code",
 			Provider: session.Provider{Mode: "platform"}, StoragePolicy: "local",
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
 			Conditions: nil, CreatedAt: time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC),

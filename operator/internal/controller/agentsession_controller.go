@@ -43,7 +43,9 @@ const (
 	sessionRetryCondition  = "ReconcileRetry"
 	gatewayTokenVolume     = "gateway-token"
 	workspaceVolume        = "workspace"
-	freePriorityClass      = "bosun-free"
+	lowPriorityClass       = "bosun-free"
+	normalPriorityClass    = "bosun-normal"
+	highPriorityClass      = "bosun-high"
 	deadlineExceededReason = "DeadlineExceeded"
 	maxTransientRetries    = 10
 	defaultIdleScan        = 30 * time.Second
@@ -842,10 +844,14 @@ func validateAgentSession(session *bosunv1alpha1.AgentSession) error {
 		session.Spec.Provider.Mode != bosunv1alpha1.ProviderModePlatform ||
 		session.Spec.Provider.CredentialID != "" ||
 		session.Spec.StoragePolicy != bosunv1alpha1.StoragePolicyLocal ||
-		session.Spec.PriorityClassName != freePriorityClass {
-		return fmt.Errorf("P0 only supports platform + local + claude-code + bosun-free")
+		!supportedPriorityClass(session.Spec.PriorityClassName) {
+		return fmt.Errorf("session must use a supported Bosun priority class")
 	}
 	return nil
+}
+
+func supportedPriorityClass(name string) bool {
+	return name == lowPriorityClass || name == normalPriorityClass || name == highPriorityClass
 }
 
 func validateSessionWorkload(object client.Object, session *bosunv1alpha1.AgentSession) error {

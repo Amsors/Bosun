@@ -16,23 +16,23 @@ import (
 	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
 )
 
-func TestCreateValidatesEnvironmentAndCapacity(t *testing.T) {
+func TestCreateValidatesEnvironmentAndTotalSessionCapacity(t *testing.T) {
 	userID := mustV7(t)
 	tests := []struct {
-		name   string
-		phase  string
-		active int64
-		want   error
+		name  string
+		phase string
+		total int64
+		want  error
 	}{
 		{name: "pending environment", phase: "Pending", want: ErrEnvironmentReady},
 		{name: "failed environment", phase: "Failed", want: ErrEnvironmentFailed},
-		{name: "third active session", phase: "Ready", active: MaxActiveSessionsPerUser - 1},
-		{name: "active capacity", phase: "Ready", active: MaxActiveSessionsPerUser, want: ErrCapacity},
+		{name: "queued session below total limit", phase: "Ready", total: MaxSessionsPerUser - 1},
+		{name: "total session capacity", phase: "Ready", total: MaxSessionsPerUser, want: ErrCapacity},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := newMemoryStore()
-			store.active = tt.active
+			store.total = tt.total
 			service := newTestService(t, store, &memoryIdempotency{}, environmentPhase(tt.phase), newMemoryRuntime())
 			_, err := service.Create(context.Background(), userID, "key", "POST", "/api/v1/sessions",
 				idempotency.RequestHash("POST", "/api/v1/sessions", []byte("body")), validRequest())
@@ -53,6 +53,7 @@ func TestValidCreateRequestRequiresUsefulName(t *testing.T) {
 		{name: "trimmed", edit: func(req *CreateRequest) { req.Name = "  课程项目  " }, ok: true},
 		{name: "blank", edit: func(req *CreateRequest) { req.Name = " \t " }},
 		{name: "too long", edit: func(req *CreateRequest) { req.Name = string(make([]rune, 81)) }},
+		{name: "invalid priority", edit: func(req *CreateRequest) { req.Priority = "urgent" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -261,7 +262,7 @@ func (m *memoryIdempotency) InsertIdempotencyKey(_ context.Context, rec auth.Ide
 type memoryStore struct {
 	sessions map[uuid.UUID]Session
 	events   []Event
-	active   int64
+	total    int64
 }
 
 func newMemoryStore() *memoryStore {
@@ -274,7 +275,7 @@ func (m *memoryStore) CreateWithEventAndIdempotency(_ context.Context, rec Sessi
 	// the persisted response through the service's configured in-memory store.
 	return nil
 }
-func (m *memoryStore) CountActive(context.Context, uuid.UUID) (int64, error) { return m.active, nil }
+func (m *memoryStore) CountTotal(context.Context, uuid.UUID) (int64, error) { return m.total, nil }
 func (m *memoryStore) Get(_ context.Context, userID, id uuid.UUID) (Session, error) {
 	rec, ok := m.sessions[id]
 	if !ok || rec.UserID != userID || rec.DeletedAt != nil {
@@ -435,7 +436,7 @@ func (m *idempotentMemoryStore) CreateWithEventAndIdempotency(ctx context.Contex
 
 func validRequest() CreateRequest {
 	return CreateRequest{
-		Name: "测试会话", Tier: "small", Runtime: "claude-code",
+		Name: "测试会话", Priority: "normal", Tier: "small", Runtime: "claude-code",
 		Provider: ProviderRequest{Mode: "platform"}, StoragePolicy: "local",
 	}
 }
@@ -445,7 +446,8 @@ func testSession(userID uuid.UUID) Session {
 	nonce, _ := uuid.NewV7()
 	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
 	return Session{
-		ID: id, UserID: userID, Name: "测试会话", CRNamespace: "bosun-u-test", CRName: "sess-test",
+		ID: id, UserID: userID, Name: "测试会话", Priority: "normal",
+		CRNamespace: "bosun-u-test", CRName: "sess-test",
 		Tier: "small", Runtime: "claude-code", Provider: Provider{Mode: "platform"},
 		StoragePolicy: "local", DesiredState: "Running", ResumeNonce: nonce,
 		Phase: "Pending", CreatedAt: now, UpdatedAt: now, Version: 1,

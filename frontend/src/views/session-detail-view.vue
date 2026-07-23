@@ -18,6 +18,7 @@ const error = ref('')
 const actionBusy = ref(false)
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 const id = computed(() => String(route.params.id))
+const priorityLabels = { low: '低优先级', normal: '普通优先级', high: '高优先级' } as const
 const userStatus = computed(() => {
   switch (session.value?.phaseReason) {
     case 'AgentWorking':
@@ -39,6 +40,12 @@ const userStatus = computed(() => {
         label: '等待指令',
         message: 'Claude 已完成当前回复，正在等待你的下一步指令。',
         kind: 'attention',
+      }
+    case 'Unschedulable':
+      return {
+        label: '等待资源',
+        message: `${priorityLabels[session.value?.priority || 'normal']}会话正在调度队列中；资源释放后 Kubernetes 会自动启动它。`,
+        kind: 'queued',
       }
     default:
       return { label: session.value?.phase || '', message: '', kind: 'normal' }
@@ -150,6 +157,10 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
         <div>
           <span>当前状态</span>
           <strong>{{ userStatus.label }}</strong>
+        </div>
+        <div>
+          <span>调度优先级</span>
+          <strong>{{ priorityLabels[session.priority] }}</strong>
         </div>
         <div>
           <span>创建时间</span>

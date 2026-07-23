@@ -11,11 +11,13 @@ const auth = useAuthStore()
 const sessions = useSessionStore()
 const error = ref('')
 const query = ref('')
-const phaseFilter = ref<'all' | 'working' | 'sleeping' | 'attention'>('all')
+const phaseFilter = ref<'all' | 'working' | 'queued' | 'sleeping' | 'attention'>('all')
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 
 const sleepingPhases: SessionPhase[] = ['Hibernating', 'Hibernated', 'Archived']
 const attentionReasons = ['AwaitingApproval', 'AwaitingChoice', 'AwaitingInput']
+const priorityLabels = { low: '低优先级', normal: '普通优先级', high: '高优先级' } as const
+const priorityRanks = { low: 1, normal: 2, high: 3 } as const
 
 const phaseLabels: Record<SessionPhase, string> = {
   Pending: '排队中',
@@ -48,6 +50,7 @@ const phaseDescriptions: Record<SessionPhase, string> = {
 const counts = computed(() => ({
   total: sessions.items.length,
   working: sessions.items.filter(isWorking).length,
+  queued: sessions.items.filter(isQueued).length,
   sleeping: sessions.items.filter((item) => sleepingPhases.includes(item.phase)).length,
   attention: sessions.items.filter(needsAttention).length,
 }))
@@ -56,13 +59,27 @@ function isWorking(session: Session): boolean {
   return session.phaseReason === 'AgentWorking'
 }
 
+function isQueued(session: Session): boolean {
+  return (
+    session.phaseReason === 'Unschedulable' ||
+    session.phase === 'Pending' ||
+    session.phase === 'Provisioning' ||
+    session.phase === 'Restoring'
+  )
+}
+
+function priorityLabel(priority: Session['priority']): string {
+  return priorityLabels[priority]
+}
+
 function needsAttention(session: Session): boolean {
   return session.phase === 'Failed' || attentionReasons.includes(session.phaseReason || '')
 }
 
-function userState(session: Session): 'working' | 'attention' | 'normal' {
+function userState(session: Session): 'working' | 'queued' | 'attention' | 'normal' {
   if (needsAttention(session)) return 'attention'
   if (isWorking(session)) return 'working'
+  if (isQueued(session)) return 'queued'
   return 'normal'
 }
 
@@ -76,6 +93,8 @@ function sessionLabel(session: Session): string {
       return '等待选择'
     case 'AwaitingInput':
       return '等待指令'
+    case 'Unschedulable':
+      return '等待资源'
     default:
       return phaseLabels[session.phase]
   }
@@ -91,6 +110,8 @@ function sessionDescription(session: Session): string {
       return 'Claude 正在等待你选择下一步方案'
     case 'AwaitingInput':
       return 'Claude 已完成当前回复，等待你的下一步指令'
+    case 'Unschedulable':
+      return `${priorityLabel(session.priority)}会话正在等待集群释放 CPU 或内存`
     default:
       return phaseDescriptions[session.phase]
   }
@@ -98,7 +119,7 @@ function sessionDescription(session: Session): string {
 
 const visibleSessions = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase('zh-CN')
-  return sessions.items.filter((session) => {
+  const filtered = sessions.items.filter((session) => {
     const matchesQuery =
       !keyword ||
       session.name.toLocaleLowerCase('zh-CN').includes(keyword) ||
@@ -106,10 +127,19 @@ const visibleSessions = computed(() => {
     const matchesPhase =
       phaseFilter.value === 'all' ||
       (phaseFilter.value === 'working' && isWorking(session)) ||
+      (phaseFilter.value === 'queued' && isQueued(session)) ||
       (phaseFilter.value === 'sleeping' && sleepingPhases.includes(session.phase)) ||
       (phaseFilter.value === 'attention' && needsAttention(session))
     return matchesQuery && matchesPhase
   })
+  if (phaseFilter.value === 'queued') {
+    filtered.sort(
+      (left, right) =>
+        priorityRanks[right.priority] - priorityRanks[left.priority] ||
+        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+    )
+  }
+  return filtered
 })
 
 function relativeTime(raw?: string): string {
@@ -167,6 +197,9 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
         <button :class="{ selected: phaseFilter === 'working' }" @click="phaseFilter = 'working'">
           <span>暂不关注</span><strong>{{ counts.working }}</strong>
         </button>
+        <button :class="{ selected: phaseFilter === 'queued' }" @click="phaseFilter = 'queued'">
+          <span>调度队列</span><strong>{{ counts.queued }}</strong>
+        </button>
         <button
           :class="{ selected: phaseFilter === 'attention' }"
           @click="phaseFilter = 'attention'"
@@ -217,6 +250,7 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
             <span>{{
               session.tier === 'medium' ? 'Medium · 500m / 1Gi' : 'Small · 250m / 512Mi'
             }}</span>
+            <span>{{ priorityLabel(session.priority) }}</span>
             <span>{{ relativeTime(session.lastActiveAt || session.createdAt) }}</span>
             <span class="mono">#{{ session.id.slice(0, 8) }}</span>
             <strong aria-hidden="true">打开 →</strong>
