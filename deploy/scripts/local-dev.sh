@@ -273,6 +273,7 @@ deploy_chart() {
   local provider_header="${BOSUN_DEV_PROVIDER_AUTH_HEADER:-x-api-key}"
   local provider_scheme="${BOSUN_DEV_PROVIDER_AUTH_SCHEME:-}"
 
+  "${root}/deploy/scripts/apply-crds.sh"
   echo "installing Bosun and waiting up to 10m for all workloads to become ready"
   helm upgrade --install bosun "${root}/deploy/chart" \
     --namespace "${platform_namespace}" \
