@@ -205,8 +205,8 @@ func TestUserEnvironmentReconcileRepairsManagedDrift(t *testing.T) {
 	}
 	getObject(t, namespacedName(environment.Spec.Namespace, resourceQuotaName), &quota)
 	cpuLimit := quota.Spec.Hard[corev1.ResourceLimitsCPU]
-	if cpuLimit.Cmp(resource.MustParse("2")) != 0 {
-		t.Fatalf("limits.cpu = %s, want 2", cpuLimit.String())
+	if cpuLimit.Cmp(resource.MustParse("20")) != 0 {
+		t.Fatalf("limits.cpu = %s, want 20", cpuLimit.String())
 	}
 }
 
