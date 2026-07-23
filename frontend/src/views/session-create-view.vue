@@ -10,6 +10,7 @@ import type { SessionTier } from '../api/contracts'
 
 const auth = useAuthStore()
 const router = useRouter()
+const name = ref('')
 const tier = ref<SessionTier>('small')
 const busy = ref(false)
 const error = ref('')
@@ -22,6 +23,7 @@ async function create(): Promise<void> {
   try {
     const session = await sessionApi(auth.accessToken).create(
       {
+        name: name.value.trim(),
         tier: tier.value,
         runtime: 'claude-code',
         provider: { mode: 'platform' },
@@ -34,7 +36,7 @@ async function create(): Promise<void> {
     const code = cause instanceof ApiError ? cause.code : 0
     error.value =
       code === 30003
-        ? '当前集群容量不足，请稍后重试。'
+        ? '最多同时运行 3 个会话，请先休眠或删除一个活跃会话。'
         : code === 30006
           ? '用户环境尚未就绪，请稍后重试。'
           : '创建失败，请稍后重试。'
@@ -55,6 +57,20 @@ async function create(): Promise<void> {
         </div>
       </div>
       <form class="card create-form" @submit.prevent="create">
+        <label class="field-label" for="session-name">
+          <span>会话名称</span>
+          <small>{{ name.length }}/80</small>
+        </label>
+        <input
+          id="session-name"
+          v-model="name"
+          maxlength="80"
+          required
+          autofocus
+          autocomplete="off"
+          placeholder="例如：课程项目后端优化"
+        />
+        <p class="field-help">使用任务或项目名称，方便之后快速找到这个工作区。</p>
         <fieldset>
           <legend>资源档位</legend>
           <label class="tier"

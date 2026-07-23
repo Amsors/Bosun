@@ -191,18 +191,40 @@ build_all() {
 restart_component() {
   local component="$1"
   local deployment
+  local container
+  local image
   case "${component}" in
     api | gateway | operator | frontend)
       deployment="bosun-${component}"
+      container="${component}"
       ;;
     egress-proxy)
       deployment="bosun-egress-proxy"
+      container="squid"
       ;;
     agent)
       deployment="bosun-operator"
+      image="${cluster_registry}/$(image_name "${component}"):$(image_tag)"
       echo "existing agent Pods keep their current image; create a new test session to use the rebuilt agent image"
+      kubectl --namespace "${platform_namespace}" patch "deployment/${deployment}" \
+        --type=json \
+        --patch="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args/2\",\"value\":\"--agent-image=${image}\"}]"
+      kubectl --namespace "${platform_namespace}" rollout status "deployment/${deployment}" --timeout=180s
+      return
       ;;
   esac
+
+  image="${cluster_registry}/$(image_name "${component}"):$(image_tag)"
+  kubectl --namespace "${platform_namespace}" set image \
+    "deployment/${deployment}" \
+    "${container}=${image}"
+  if [[ "${component}" == "operator" ]]; then
+    kubectl --namespace "${platform_namespace}" patch "deployment/${deployment}" \
+      --type=json \
+      --patch='[{"op":"replace","path":"/spec/template/spec/containers/0/args/7","value":"--idle-scan-interval=5s"}]'
+  fi
+  # Uncommitted local changes reuse the current Git SHA tag. Restart even when
+  # the image reference is unchanged so imagePullPolicy=Always fetches the new digest.
   kubectl --namespace "${platform_namespace}" rollout restart "deployment/${deployment}"
   kubectl --namespace "${platform_namespace}" rollout status "deployment/${deployment}" --timeout=180s
 }

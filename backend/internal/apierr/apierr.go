@@ -21,7 +21,7 @@ var (
 	RateLimited         = Error{Code: 20003, Name: "rate_limited", Message: "请求过于频繁", HTTPStatus: http.StatusTooManyRequests}
 	SessionNotFound     = Error{Code: 30001, Name: "session_not_found", Message: "会话不存在", HTTPStatus: http.StatusNotFound}
 	InvalidTransition   = Error{Code: 30002, Name: "invalid_transition", Message: "会话状态转换非法", HTTPStatus: http.StatusConflict}
-	CapacityUnavailable = Error{Code: 30003, Name: "capacity_unavailable", Message: "暂无可用算力", HTTPStatus: http.StatusConflict}
+	CapacityUnavailable = Error{Code: 30003, Name: "capacity_unavailable", Message: "最多同时运行 3 个会话", HTTPStatus: http.StatusConflict}
 	SessionNotRunning   = Error{Code: 30004, Name: "session_not_running", Message: "会话未运行", HTTPStatus: http.StatusConflict}
 	EnvironmentFailed   = Error{Code: 30005, Name: "environment_failed", Message: "用户环境初始化失败", HTTPStatus: http.StatusConflict}
 	EnvironmentNotReady = Error{Code: 30006, Name: "environment_not_ready", Message: "用户环境尚未就绪", HTTPStatus: http.StatusConflict}

@@ -19,6 +19,7 @@ describe('session API', () => {
 
     await sessionApi('access').create(
       {
+        name: '课程项目',
         tier: 'small',
         runtime: 'claude-code',
         provider: { mode: 'platform' },

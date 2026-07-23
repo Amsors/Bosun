@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -108,7 +110,7 @@ func (s *Service) Create(
 		if err != nil {
 			return err
 		}
-		if active >= 1 {
+		if active >= MaxActiveSessionsPerUser {
 			return ErrCapacity
 		}
 		sessionID, err := uuid.NewV7()
@@ -120,8 +122,9 @@ func (s *Service) Create(
 			return fmt.Errorf("generate resume nonce: %w", err)
 		}
 		now := s.now()
+		name := strings.TrimSpace(req.Name)
 		rec := Session{
-			ID: sessionID, UserID: userID, CRNamespace: userenv.Namespace(userID.String()),
+			ID: sessionID, UserID: userID, Name: name, CRNamespace: userenv.Namespace(userID.String()),
 			CRName: sessionidentity.CRName(sessionID.String()), Tier: req.Tier, Runtime: req.Runtime,
 			Provider: Provider{Mode: req.Provider.Mode}, StoragePolicy: req.StoragePolicy,
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
@@ -133,7 +136,7 @@ func (s *Service) Create(
 			return err
 		}
 		event, err := newEvent(rec.ID, "session.created", map[string]any{
-			"tier": rec.Tier, "runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
+			"name": rec.Name, "tier": rec.Tier, "runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
 		}, now)
 		if err != nil {
 			return err
@@ -260,7 +263,11 @@ func (s *Service) Delete(ctx context.Context, userID, sessionID uuid.UUID) (Sess
 }
 
 func validCreateRequest(req CreateRequest) bool {
-	return (req.Tier == "small" || req.Tier == "medium") &&
+	name := strings.TrimSpace(req.Name)
+	return utf8.ValidString(name) &&
+		utf8.RuneCountInString(name) >= 1 &&
+		utf8.RuneCountInString(name) <= 80 &&
+		(req.Tier == "small" || req.Tier == "medium") &&
 		req.Runtime == "claude-code" &&
 		req.Provider.Mode == "platform" &&
 		req.Provider.CredentialID == "" &&

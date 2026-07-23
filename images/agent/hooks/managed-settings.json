@@ -10,6 +10,100 @@
             "command": "/usr/local/lib/bosun/hooks/session-start",
             "args": [],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/bosun/hooks/agent-state",
+            "args": [],
+            "timeout": 5
           }
         ]
       }

@@ -243,6 +243,7 @@ func main() {
 		EgressProxyURL:   egressProxyURL,
 		IdleScanInterval: idleScanInterval,
 		Quiescer:         quiescer,
+		StateReader:      quiescer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentsession")
 		os.Exit(1)
