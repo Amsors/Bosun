@@ -2,7 +2,7 @@
 
 本目录记录 k3s 集群的固定节点身份、安全参数与生产入口配置。真实 kubeconfig、join token 和任何 Secret 不得写入仓库。
 
-无业务数据时的三节点重建、Tailscale 联网、集群初始化和首次发布步骤见
+无业务数据时的节点重建、Tailscale 联网、集群初始化和首次发布步骤见
 [`rebuild.md`](./rebuild.md)。
 
 ## 一键清空业务数据
@@ -65,6 +65,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 |---|---|---|
 | `node-sg-control` | `region=sg`, `role=core` | 无 |
 | `node-hk-worker` | `region=hk`, `role=worker` | 无 |
+| `node-hk-worker-1` | `region=hk`, `role=worker` | 无 |
 | `node-hk-edge` | `region=hk`, `role=edge` | `bosun.io/edge=true:NoSchedule` |
 
 在已加入集群的节点上幂等执行：
