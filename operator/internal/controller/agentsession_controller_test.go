@@ -26,6 +26,15 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	reconciler := newAgentSessionReconciler()
 	reconcileAgentSession(t, reconciler, session, 4)
 
+	assertSmallSessionPVC(t, session)
+	assertSessionServiceAccount(t, session)
+	pod := getAgentPod(t, session)
+	assertSecureSmallSessionPod(t, session, &pod)
+	assertAgentSessionPodReconcileIsIdempotent(t, reconciler, session, &pod)
+}
+
+func assertSmallSessionPVC(t *testing.T, session *bosunv1alpha1.AgentSession) {
+	t.Helper()
 	var pvc corev1.PersistentVolumeClaim
 	getObject(t, namespacedName(session.Namespace, sessionidentity.PVCName(session.Spec.SessionID)), &pvc)
 	assertSessionLabels(t, pvc.Labels, session)
@@ -33,19 +42,34 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if storage.Cmp(resource.MustParse("5Gi")) != 0 || pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "local-path" {
 		t.Fatalf("PVC spec = %#v", pvc.Spec)
 	}
+}
 
+func assertSessionServiceAccount(t *testing.T, session *bosunv1alpha1.AgentSession) {
+	t.Helper()
 	var sa corev1.ServiceAccount
 	getObject(t, namespacedName(session.Namespace, sessionidentity.ServiceAccountName(session.Spec.SessionID)), &sa)
 	if sa.AutomountServiceAccountToken == nil || *sa.AutomountServiceAccountToken {
 		t.Fatal("session ServiceAccount must disable automount")
 	}
+}
 
+func getAgentPod(t *testing.T, session *bosunv1alpha1.AgentSession) corev1.Pod {
+	t.Helper()
 	var pod corev1.Pod
 	if err := testClient.Get(context.Background(), namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)), &pod); err != nil {
 		var current bosunv1alpha1.AgentSession
 		getObject(t, clientKey(session), &current)
 		t.Fatalf("get Pod: %v; phase=%s conditions=%#v", err, current.Status.Phase, current.Status.Conditions)
 	}
+	return pod
+}
+
+func assertSecureSmallSessionPod(
+	t *testing.T,
+	session *bosunv1alpha1.AgentSession,
+	pod *corev1.Pod,
+) {
+	t.Helper()
 	assertSessionLabels(t, pod.Labels, session)
 	if pod.Spec.ActiveDeadlineSeconds == nil || *pod.Spec.ActiveDeadlineSeconds != 28800 {
 		t.Fatalf("activeDeadlineSeconds = %v", pod.Spec.ActiveDeadlineSeconds)
@@ -78,9 +102,9 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 	if got := tokenVolumeMounts(pod.Spec.Containers[1]); got != 1 {
 		t.Fatalf("proxy token volume mounts = %d, want 1", got)
 	}
-	assertGatewayTokenProjection(t, &pod)
-	assertLLMEgressConfiguration(t, &pod)
-	assertPersistentRuntimeMounts(t, &pod)
+	assertGatewayTokenProjection(t, pod)
+	assertLLMEgressConfiguration(t, pod)
+	assertPersistentRuntimeMounts(t, pod)
 	if len(pod.Spec.Tolerations) != 2 ||
 		pod.Spec.Tolerations[0].TolerationSeconds == nil ||
 		*pod.Spec.Tolerations[0].TolerationSeconds != 300 {
@@ -92,10 +116,18 @@ func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *test
 		!reflect.DeepEqual(requirement.Values, []string{"worker"}) {
 		t.Fatalf("required node affinity = %#v, want role in [worker]", requirement)
 	}
+}
 
+func assertAgentSessionPodReconcileIsIdempotent(
+	t *testing.T,
+	reconciler *AgentSessionReconciler,
+	session *bosunv1alpha1.AgentSession,
+	pod *corev1.Pod,
+) {
+	t.Helper()
 	version := pod.ResourceVersion
 	reconcileAgentSession(t, reconciler, session, 1)
-	getObject(t, namespacedName(session.Namespace, pod.Name), &pod)
+	getObject(t, namespacedName(session.Namespace, pod.Name), pod)
 	if pod.ResourceVersion != version {
 		t.Fatalf("Pod resourceVersion changed during idempotent reconcile: %s -> %s", version, pod.ResourceVersion)
 	}
