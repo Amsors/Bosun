@@ -306,6 +306,7 @@ deploy_chart() {
     helm_conflict_args+=(--force-conflicts)
   fi
 
+  "${root}/deploy/scripts/apply-crds.sh"
   echo "installing Bosun and waiting up to 10m for all workloads to become ready"
   helm upgrade --install bosun "${root}/deploy/chart" \
     --namespace "${platform_namespace}" \

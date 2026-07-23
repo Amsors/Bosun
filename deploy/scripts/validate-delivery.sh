@@ -80,3 +80,12 @@ mkdir -p "${generated}/operator"
 diff -ru "${root}/operator/config/crd/bases" "${generated}/operator/config/crd/bases"
 diff -u "${root}/operator/api/v1alpha1/zz_generated.deepcopy.go" \
   "${generated}/operator/api/v1alpha1/zz_generated.deepcopy.go"
+
+if ! grep -q 'deploy/scripts/apply-crds.sh' "${root}/.github/workflows/deploy.yml"; then
+  echo "production deployment does not upgrade Bosun CRDs before Helm" >&2
+  exit 1
+fi
+if ! grep -q 'deploy/scripts/apply-crds.sh' "${root}/deploy/scripts/local-dev.sh"; then
+  echo "local deployment does not upgrade Bosun CRDs before Helm" >&2
+  exit 1
+fi
