@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-build dev-deploy dev-forward dev-smoke dev-reset dev-down
+.PHONY: dev-up dev-build dev-deploy dev-forward dev-smoke dev-reset dev-down cluster-reset-data cluster-reset-data-test
 
 COMPONENT ?= all
 
@@ -22,3 +22,9 @@ dev-reset:
 
 dev-down:
 	./deploy/scripts/local-dev.sh down
+
+cluster-reset-data:
+	./deploy/scripts/reset-data.sh
+
+cluster-reset-data-test:
+	./deploy/scripts/reset-data-test.sh

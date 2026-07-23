@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+scenario="${FAKE_KUBECTL_SCENARIO:-happy}"
+state_dir="${FAKE_KUBECTL_STATE_DIR:?FAKE_KUBECTL_STATE_DIR is required}"
+
+if [[ "$*" == "config current-context" ]]; then
+  printf 'test-context\n'
+  exit 0
+fi
+
+if [[ "${1:-}" == "--context" ]]; then
+  shift 2
+fi
+
+arguments=" $* "
+
+if [[ "${arguments}" == *" rollout status "* ]]; then
+  exit 0
+fi
+
+if [[ "${arguments}" == *" scale "* ]]; then
+  exit 0
+fi
+
+if [[ "${arguments}" == *" delete "* ]]; then
+  exit 0
+fi
+
+if [[ "${arguments}" == *" exec --stdin statefulset/bosun-postgresql "* ]]; then
+  : >"${state_dir}/database-reset-started"
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get namespaces --output=go-template="* ]]; then
+  if [[ "${scenario}" == "fail-namespace-inventory" ]] &&
+    [[ ! -e "${state_dir}/database-reset-started" ]]; then
+    echo "forbidden: cannot list namespaces" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get persistentvolumeclaims --all-namespaces --selector bosun.io/session --output=go-template="* ]]; then
+  if [[ "${scenario}" == "fail-pv-wait" ]]; then
+    printf 'workspace|pv-workspace\n'
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get persistentvolumes --output=go-template="* ]]; then
+  if [[ "${scenario}" == "fail-pv-wait" ]]; then
+    printf 'pv-workspace|bosun-u-aaaaaaaa|Delete\n'
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get persistentvolume pv-workspace --output=jsonpath="* ]]; then
+  printf 'Delete'
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get persistentvolume pv-workspace --ignore-not-found --output=name "* ]]; then
+  if [[ "${scenario}" == "fail-pv-wait" ]]; then
+    echo "timeout while reading PersistentVolume" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get deployment/bosun-api --output=jsonpath="* ]] ||
+  [[ "${arguments}" == *" get deployment/bosun-gateway --output=jsonpath="* ]]; then
+  printf '1'
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get agentsessions.bosun.io --all-namespaces --output=name "* ]]; then
+  if [[ "${scenario}" == "fail-session-inventory" ]] &&
+    [[ ! -e "${state_dir}/database-reset-started" ]]; then
+    echo "forbidden: cannot list AgentSessions" >&2
+    exit 1
+  fi
+  if [[ "${scenario}" == "fail-final-verification" ]] &&
+    [[ -e "${state_dir}/database-reset-started" ]]; then
+    echo "connection reset while verifying AgentSessions" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get pods --selector app.kubernetes.io/name=bosun-api --output=name "* ]] ||
+  [[ "${arguments}" == *" get pods --selector app.kubernetes.io/name=bosun-gateway --output=name "* ]]; then
+  if [[ "${scenario}" == "fail-pod-wait" ]]; then
+    echo "timeout while listing Pods" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${arguments}" == *" get "* ]]; then
+  exit 0
+fi
+
+echo "unexpected fake kubectl invocation: $*" >&2
+exit 1

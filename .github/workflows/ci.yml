@@ -152,6 +152,8 @@ jobs:
         run: ./deploy/scripts/validate-delivery.sh
       - name: Check delivery shell scripts
         run: shellcheck -x -P e2e deploy/scripts/*.sh e2e/*.sh
+      - name: Test cluster data reset failure handling
+        run: make cluster-reset-data-test
 
   ci_gate:
     name: ci-gate

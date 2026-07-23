@@ -5,6 +5,36 @@
 无业务数据时的三节点重建、Tailscale 联网、集群初始化和首次发布步骤见
 [`rebuild.md`](./rebuild.md)。
 
+## 一键清空业务数据
+
+需要保留 k3s 节点、Helm release、镜像、证书和平台 Secret，只把 Bosun 恢复到没有用户和
+Session 的初始状态时，执行：
+
+```bash
+KUBECONFIG="$PWD/tmp_kubeconfig" \
+RESET_CONTEXT='<当前 kubeconfig 中的准确 context 名称>' \
+make cluster-reset-data
+```
+
+命令会先展示待删除资源数量，并要求输入 `DELETE ALL BOSUN DATA`。无人值守执行时可以显式传入：
+
+```bash
+KUBECONFIG="$PWD/tmp_kubeconfig" \
+RESET_CONTEXT='<当前 kubeconfig 中的准确 context 名称>' \
+RESET_CONFIRM='DELETE ALL BOSUN DATA' \
+make cluster-reset-data
+```
+
+重置过程会临时停止 API 和 gateway，保留 operator 运行并通过 `AgentSession` finalizer 删除 Agent
+Pod、ServiceAccount 和 PVC；随后删除 `UserEnvironment` 与 `bosun-u-*` namespace，清空 PostgreSQL
+的 `bosun` schema，再启动 API 自动重跑 migration。脚本只自动删除同时具有 Bosun ownership labels
+的用户 namespace，并要求 workspace PV 使用 `Delete` reclaim policy；无法保证物理数据删除时会拒绝继续。
+资源发现、删除等待或最终验证中的任意 `kubectl` 查询失败都会中止重置，不会把 Forbidden、timeout 等错误
+误判为资源已经删除。
+
+该命令不会删除 `bosun-platform`、PostgreSQL PVC、CRD、Secret、证书或更换 JWT 私钥。失败时脚本会
+尽力恢复 API 和 gateway 的原副本数，并保留错误现场供排查。
+
 ## k3s server 参数
 
 新加坡 core 节点 `node-sg-control` 运行唯一的 k3s server。安装或重建时必须至少使用以下参数：
