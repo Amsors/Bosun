@@ -386,6 +386,17 @@ func TestAgentSessionReportsReadableUnschedulableCapacityCondition(t *testing.T)
 	}
 }
 
+func TestSupportedPriorityClasses(t *testing.T) {
+	for _, name := range []string{lowPriorityClass, normalPriorityClass, highPriorityClass} {
+		if !supportedPriorityClass(name) {
+			t.Fatalf("supportedPriorityClass(%q) = false", name)
+		}
+	}
+	if supportedPriorityClass("system-cluster-critical") {
+		t.Fatal("supportedPriorityClass accepted a platform priority class")
+	}
+}
+
 func TestAgentSessionFinalizerDeletesPodBeforePVC(t *testing.T) {
 	ctx := context.Background()
 	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012405", "018f9c6e-1234-7000-8000-abcdef012505")
@@ -411,7 +422,7 @@ func createAgentSession(t *testing.T, sessionID, userID string) *bosunv1alpha1.A
 	t.Helper()
 	ctx := context.Background()
 	if err := testClient.Create(ctx, &schedulingv1.PriorityClass{
-		ObjectMeta: metav1.ObjectMeta{Name: freePriorityClass}, Value: 1000,
+		ObjectMeta: metav1.ObjectMeta{Name: normalPriorityClass}, Value: 2000,
 	}); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("create PriorityClass: %v", err)
 	}
@@ -431,7 +442,7 @@ func createAgentSession(t *testing.T, sessionID, userID string) *bosunv1alpha1.A
 			Tier: bosunv1alpha1.SessionTierSmall, Runtime: bosunv1alpha1.RuntimeClaudeCode,
 			Provider:      bosunv1alpha1.ProviderSpec{Mode: bosunv1alpha1.ProviderModePlatform},
 			StoragePolicy: bosunv1alpha1.StoragePolicyLocal, IdleTimeoutSeconds: 1800,
-			ActiveDeadlineSeconds: 28800, PriorityClassName: freePriorityClass,
+			ActiveDeadlineSeconds: 28800, PriorityClassName: normalPriorityClass,
 		},
 	}
 	if err := testClient.Create(ctx, session); err != nil {

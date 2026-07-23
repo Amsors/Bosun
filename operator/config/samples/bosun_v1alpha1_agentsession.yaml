@@ -18,4 +18,4 @@ spec:
   storagePolicy: local
   idleTimeoutSeconds: 1800
   activeDeadlineSeconds: 28800
-  priorityClassName: bosun-free
+  priorityClassName: bosun-normal

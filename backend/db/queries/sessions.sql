@@ -1,24 +1,17 @@
 -- name: CreateSession :one
 INSERT INTO bosun.sessions (
-    id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode,
+    id, user_id, cr_namespace, cr_name, display_name, priority, tier, runtime, provider_mode,
     provider_credential_id, storage_policy, desired_state, resume_nonce,
     phase, phase_reason, conditions, last_active_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-    $12, $13, $14, $15, $16, $16
+    $12, $13, $14, $15, $16, $17, $18, $18
 )
 RETURNING *;
 
 -- name: InsertSessionEvent :exec
 INSERT INTO bosun.session_events (id, session_id, type, payload, occurred_at)
 VALUES ($1, $2, $3, $4, $5);
-
--- name: CountActiveSessionsForUser :one
-SELECT count(*)
-FROM bosun.sessions
-WHERE user_id = $1
-  AND deleted_at IS NULL
-  AND phase IN ('Pending', 'Provisioning', 'Running', 'Idle', 'Hibernating', 'Restoring');
 
 -- name: GetSessionForUser :one
 SELECT *
@@ -53,7 +46,9 @@ WHERE user_id = $1 AND deleted_at IS NULL;
 SELECT *
 FROM bosun.sessions
 WHERE deleted_at IS NULL AND phase = 'Pending'
-ORDER BY created_at
+ORDER BY
+  CASE priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END DESC,
+  created_at
 LIMIT $1;
 
 -- name: ListDeletingSessions :many

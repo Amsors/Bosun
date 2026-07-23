@@ -106,11 +106,11 @@ func (s *Service) Create(
 		default:
 			return ErrEnvironmentReady
 		}
-		active, err := s.store.CountActive(ctx, userID)
+		total, err := s.store.CountTotal(ctx, userID)
 		if err != nil {
 			return err
 		}
-		if active >= MaxActiveSessionsPerUser {
+		if total >= MaxSessionsPerUser {
 			return ErrCapacity
 		}
 		sessionID, err := uuid.NewV7()
@@ -124,8 +124,9 @@ func (s *Service) Create(
 		now := s.now()
 		name := strings.TrimSpace(req.Name)
 		rec := Session{
-			ID: sessionID, UserID: userID, Name: name, CRNamespace: userenv.Namespace(userID.String()),
-			CRName: sessionidentity.CRName(sessionID.String()), Tier: req.Tier, Runtime: req.Runtime,
+			ID: sessionID, UserID: userID, Name: name, Priority: req.Priority,
+			CRNamespace: userenv.Namespace(userID.String()),
+			CRName:      sessionidentity.CRName(sessionID.String()), Tier: req.Tier, Runtime: req.Runtime,
 			Provider: Provider{Mode: req.Provider.Mode}, StoragePolicy: req.StoragePolicy,
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
 			PhaseReason: "CreateRequested", Conditions: nil, LastActiveAt: &now,
@@ -136,7 +137,8 @@ func (s *Service) Create(
 			return err
 		}
 		event, err := newEvent(rec.ID, "session.created", map[string]any{
-			"name": rec.Name, "tier": rec.Tier, "runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
+			"name": rec.Name, "priority": rec.Priority, "tier": rec.Tier,
+			"runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
 		}, now)
 		if err != nil {
 			return err
@@ -267,6 +269,7 @@ func validCreateRequest(req CreateRequest) bool {
 	return utf8.ValidString(name) &&
 		utf8.RuneCountInString(name) >= 1 &&
 		utf8.RuneCountInString(name) <= 80 &&
+		(req.Priority == "low" || req.Priority == "normal" || req.Priority == "high") &&
 		(req.Tier == "small" || req.Tier == "medium") &&
 		req.Runtime == "claude-code" &&
 		req.Provider.Mode == "platform" &&

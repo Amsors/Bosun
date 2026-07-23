@@ -56,6 +56,9 @@ func TestSessionStoreRepairAndOutOfOrderProjectionIntegration(t *testing.T) {
 	if cr.Spec.SessionID != rec.ID.String() {
 		t.Fatalf("repaired spec.sessionID = %q", cr.Spec.SessionID)
 	}
+	if cr.Spec.PriorityClassName != "bosun-normal" {
+		t.Fatalf("repaired spec.priorityClassName = %q, want bosun-normal", cr.Spec.PriorityClassName)
+	}
 
 	newerEvent, _ := newEvent(rec.ID, "session.phase_changed", map[string]any{}, rec.CreatedAt.Add(time.Second))
 	updated, err := store.Project(ctx, Projection{
@@ -76,6 +79,9 @@ func TestSessionStoreRepairAndOutOfOrderProjectionIntegration(t *testing.T) {
 	got, err := store.Get(ctx, userID, rec.ID)
 	if err != nil || got.Phase != "Running" {
 		t.Fatalf("projected session phase=%q error=%v, want Running", got.Phase, err)
+	}
+	if got.Priority != "normal" {
+		t.Fatalf("projected session priority=%q, want normal", got.Priority)
 	}
 }
 

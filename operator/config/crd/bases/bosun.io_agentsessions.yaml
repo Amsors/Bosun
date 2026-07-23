@@ -66,9 +66,11 @@ spec:
                 minimum: 60
                 type: integer
               priorityClassName:
-                default: bosun-free
+                default: bosun-normal
                 enum:
                 - bosun-free
+                - bosun-normal
+                - bosun-high
                 type: string
               provider:
                 properties:

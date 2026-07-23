@@ -179,8 +179,19 @@ func agentSessionFromDomain(session Session) *bosunv1alpha1.AgentSession {
 			StoragePolicy:         bosunv1alpha1.StoragePolicy(session.StoragePolicy),
 			IdleTimeoutSeconds:    1800,
 			ActiveDeadlineSeconds: 28800,
-			PriorityClassName:     "bosun-free",
+			PriorityClassName:     priorityClassName(session.Priority),
 		},
+	}
+}
+
+func priorityClassName(priority string) string {
+	switch priority {
+	case "low":
+		return "bosun-free"
+	case "high":
+		return "bosun-high"
+	default:
+		return "bosun-normal"
 	}
 }
 
