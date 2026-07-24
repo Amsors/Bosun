@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Session } from '../api/contracts'
 import { sessionApi } from '../api/sessions'
 import AppShell from '../components/app-shell.vue'
+import ResourceUsagePanel from '../components/resource-usage-panel.vue'
 import StatusPanel from '../components/status-panel.vue'
 import TerminalPanel from '../components/terminal-panel.vue'
 import { useAuthStore } from '../stores/auth-store'
@@ -185,6 +186,12 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
           <p>{{ condition.message }}</p>
         </article>
       </section>
+      <ResourceUsagePanel
+        v-if="session.phase === 'Running'"
+        :session-id="session.id"
+        :get-access-token="() => auth.accessToken"
+        :refresh-access-token="auth.refresh"
+      />
       <TerminalPanel
         v-if="session.phase === 'Running'"
         :session-id="session.id"

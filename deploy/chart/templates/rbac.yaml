@@ -52,8 +52,8 @@ subjects:
     name: bosun-operator
     namespace: {{ .Release.Namespace }}
 ---
-# backend API 只对 CR 做 CRUD（techspec §9.2）；不授予 status 写权限（status 由 operator 独占），
-# 也不授予 Pod/PVC/Secret 集群级权限——那些通过 operator 在各用户 namespace 创建的 RoleBinding 下放。
+# backend API 对 CR 做 CRUD，并为公开的课程展示监控页读取集群 Pod、Node 与 metrics-server 数据；
+# 不授予 status 写权限（status 由 operator 独占）。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -64,6 +64,12 @@ rules:
   - apiGroups: ["bosun.io"]
     resources: ["userenvironments", "agentsessions"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

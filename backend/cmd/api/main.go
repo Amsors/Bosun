@@ -20,6 +20,7 @@ import (
 	"github.com/Amsors/Bosun/backend/internal/config"
 	"github.com/Amsors/Bosun/backend/internal/database"
 	"github.com/Amsors/Bosun/backend/internal/logging"
+	"github.com/Amsors/Bosun/backend/internal/monitor"
 	"github.com/Amsors/Bosun/backend/internal/ratelimit"
 	"github.com/Amsors/Bosun/backend/internal/session"
 	"github.com/Amsors/Bosun/backend/internal/terminal"
@@ -73,6 +74,11 @@ func run() int {
 		logger.Error("terminal Kubernetes clients init failed", "reason", err)
 		return 1
 	}
+	monitorSource, err := newMonitorSource()
+	if err != nil {
+		logger.Error("monitor Kubernetes clients init failed", "reason", err)
+		return 1
+	}
 
 	issuer, err := auth.NewJWTIssuer(authCfg.Issuer, authCfg.JWTPrivateKey, authCfg.AccessTokenTTL)
 	if err != nil {
@@ -112,6 +118,11 @@ func run() int {
 	go sessionRepairer.Run(ctx)
 	projector := session.NewProjector(sessionStore, k8sClient, logger)
 	go projector.Run(ctx)
+	monitorService, err := monitor.NewService(sessionStore, monitor.NewPgxOwnerStore(pool), monitorSource)
+	if err != nil {
+		logger.Error("monitor service init failed", "reason", err)
+		return 1
+	}
 	terminalHandler, err := terminal.NewHandler(terminal.Config{
 		WriteQueueCapacity:  terminalCfg.WriteQueueCapacity,
 		InputQueueCapacity:  terminalCfg.InputQueueCapacity,
@@ -142,6 +153,7 @@ func run() int {
 		TrustedProxyHeader: authCfg.TrustedProxyHeader,
 		Sessions:           sessionService,
 		Terminal:           terminalHandler,
+		Monitor:            monitorService,
 	})
 
 	server := &http.Server{
@@ -182,6 +194,14 @@ func newTerminalRuntime() (*terminal.KubernetesRuntime, error) {
 		return nil, err
 	}
 	return terminal.NewKubernetesRuntime(restCfg)
+}
+
+func newMonitorSource() (*monitor.KubernetesSource, error) {
+	restCfg, err := ctrlconfig.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return monitor.NewKubernetesSource(restCfg)
 }
 
 // newK8sClient 构造用于创建/读取 CR 的 typed client；使用 in-cluster 或本地 kubeconfig。
