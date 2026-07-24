@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import type { ClusterResourceSnapshot } from '../api/contracts'
+import type {
+  ClusterResourceSnapshot,
+  ContainerResourceSnapshot,
+  PodResourceSnapshot,
+} from '../api/contracts'
 import { monitorApi } from '../api/monitor'
 import AppShell from '../components/app-shell.vue'
 import StatusPanel from '../components/status-panel.vue'
@@ -14,8 +18,13 @@ const search = ref('')
 const showKubeSystem = ref(false)
 const showCertManager = ref(false)
 const agentOnly = ref(false)
+const resizeDrafts = ref<Record<string, { cpuMillicores: number; memoryMiB: number }>>({})
+const resizeDirty = ref<Record<string, boolean>>({})
+const resizeBusy = ref<Record<string, boolean>>({})
+const resizeErrors = ref<Record<string, string>>({})
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 let requestActive = false
+const mebibyte = 1024 * 1024
 
 const visiblePods = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
@@ -35,13 +44,112 @@ async function load(): Promise<void> {
   if (requestActive) return
   requestActive = true
   try {
-    snapshot.value = await monitorApi.cluster()
+    const next = await monitorApi.cluster()
+    syncResizeDrafts(next.pods)
+    snapshot.value = next
     error.value = ''
   } catch {
     error.value = '无法读取集群资源信息。'
   } finally {
     requestActive = false
     loading.value = false
+  }
+}
+
+function agentContainer(pod: PodResourceSnapshot): ContainerResourceSnapshot | undefined {
+  return pod.containers.find((container) => container.name === 'agent')
+}
+
+function draftFromPod(pod: PodResourceSnapshot): { cpuMillicores: number; memoryMiB: number } {
+  const limits = agentContainer(pod)?.limits
+  return {
+    cpuMillicores: limits?.cpuMillicores || 0,
+    memoryMiB: Math.round((limits?.memoryBytes || 0) / mebibyte),
+  }
+}
+
+function sameDraft(
+  left: { cpuMillicores: number; memoryMiB: number } | undefined,
+  right: { cpuMillicores: number; memoryMiB: number },
+): boolean {
+  return left?.cpuMillicores === right.cpuMillicores && left.memoryMiB === right.memoryMiB
+}
+
+function syncResizeDrafts(pods: PodResourceSnapshot[]): void {
+  for (const pod of pods) {
+    if (!pod.isAgent || !pod.sessionID || !agentContainer(pod)) continue
+    const current = draftFromPod(pod)
+    if (!resizeDrafts.value[pod.sessionID] || !resizeDirty.value[pod.sessionID]) {
+      resizeDrafts.value[pod.sessionID] = current
+    }
+  }
+}
+
+function startResizeEdit(sessionID: string): void {
+  resizeDirty.value[sessionID] = true
+}
+
+function finishResizeEdit(pod: PodResourceSnapshot): void {
+  if (!pod.sessionID) return
+  resizeDirty.value[pod.sessionID] = !sameDraft(
+    resizeDrafts.value[pod.sessionID],
+    draftFromPod(pod),
+  )
+}
+
+function minimumCPU(pod: PodResourceSnapshot): number {
+  return agentContainer(pod)?.requests.cpuMillicores || 1
+}
+
+function minimumMemoryMiB(pod: PodResourceSnapshot): number {
+  return Math.ceil((agentContainer(pod)?.requests.memoryBytes || 1) / mebibyte)
+}
+
+function canResize(pod: PodResourceSnapshot): boolean {
+  if (!pod.sessionID || pod.phase !== 'Running' || resizeBusy.value[pod.sessionID]) return false
+  const draft = resizeDrafts.value[pod.sessionID]
+  if (
+    !draft ||
+    !Number.isInteger(draft.cpuMillicores) ||
+    !Number.isInteger(draft.memoryMiB) ||
+    draft.cpuMillicores < minimumCPU(pod) ||
+    draft.memoryMiB < minimumMemoryMiB(pod)
+  )
+    return false
+  return !sameDraft(draft, draftFromPod(pod))
+}
+
+async function applyResize(pod: PodResourceSnapshot): Promise<void> {
+  if (!pod.sessionID || !canResize(pod)) return
+  const sessionID = pod.sessionID
+  const draft = resizeDrafts.value[sessionID]!
+  resizeBusy.value[sessionID] = true
+  resizeErrors.value[sessionID] = ''
+  try {
+    const result = await monitorApi.resizeAgent(sessionID, {
+      cpuMillicores: draft.cpuMillicores,
+      memoryBytes: draft.memoryMiB * mebibyte,
+    })
+    const updated = {
+      ...result.pod,
+      username: pod.username,
+      sessionName: pod.sessionName,
+    }
+    if (snapshot.value) {
+      snapshot.value = {
+        ...snapshot.value,
+        observedAt: result.observedAt,
+        pods: snapshot.value.pods.map((item) =>
+          item.namespace === pod.namespace && item.name === pod.name ? updated : item,
+        ),
+      }
+    }
+    resizeDirty.value[sessionID] = false
+    syncResizeDrafts([updated])
+  } catch {
+    resizeErrors.value[sessionID] = '调整失败，请检查输入值和集群的 in-place resize 状态。'
+  } finally {
+    resizeBusy.value[sessionID] = false
   }
 }
 
@@ -174,6 +282,7 @@ onUnmounted(() => {
                 <th>CPU 用量 / Limit</th>
                 <th>内存用量 / Limit</th>
                 <th>Agent 用户</th>
+                <th>Agent Limit 调整</th>
               </tr>
             </thead>
             <tbody>
@@ -215,9 +324,53 @@ onUnmounted(() => {
                   </template>
                   <span v-else>—</span>
                 </td>
+                <td>
+                  <form
+                    v-if="pod.isAgent && pod.sessionID && resizeDrafts[pod.sessionID]"
+                    class="resize-form"
+                    @submit.prevent="applyResize(pod)"
+                  >
+                    <label>
+                      <span>CPU (m)</span>
+                      <input
+                        v-model.number="resizeDrafts[pod.sessionID].cpuMillicores"
+                        type="number"
+                        step="1"
+                        :min="minimumCPU(pod)"
+                        :disabled="resizeBusy[pod.sessionID] || pod.phase !== 'Running'"
+                        @focus="startResizeEdit(pod.sessionID)"
+                        @input="startResizeEdit(pod.sessionID)"
+                        @blur="finishResizeEdit(pod)"
+                      />
+                    </label>
+                    <label>
+                      <span>内存 (MiB)</span>
+                      <input
+                        v-model.number="resizeDrafts[pod.sessionID].memoryMiB"
+                        type="number"
+                        step="1"
+                        :min="minimumMemoryMiB(pod)"
+                        :disabled="resizeBusy[pod.sessionID] || pod.phase !== 'Running'"
+                        @focus="startResizeEdit(pod.sessionID)"
+                        @input="startResizeEdit(pod.sessionID)"
+                        @blur="finishResizeEdit(pod)"
+                      />
+                    </label>
+                    <button class="primary" type="submit" :disabled="!canResize(pod)">
+                      {{ resizeBusy[pod.sessionID] ? '调整中…' : '应用' }}
+                    </button>
+                    <span v-if="pod.resize" class="resize-state">
+                      {{ pod.resize.reason || 'Kubernetes 正在应用新 Limit' }}
+                    </span>
+                    <span v-if="resizeErrors[pod.sessionID]" class="resize-error" role="alert">
+                      {{ resizeErrors[pod.sessionID] }}
+                    </span>
+                  </form>
+                  <span v-else>—</span>
+                </td>
               </tr>
               <tr v-if="!visiblePods.length">
-                <td colspan="5" class="empty-cell">没有符合当前过滤条件的 Pod。</td>
+                <td colspan="6" class="empty-cell">没有符合当前过滤条件的 Pod。</td>
               </tr>
             </tbody>
           </table>

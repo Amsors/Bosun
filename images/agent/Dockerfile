@@ -28,6 +28,21 @@ RUN apt-get update \
         tmux \
         nano \
         python3 \
+        build-essential \
+        pkg-config \
+        cmake \
+        ninja-build \ 
+        python3-pip \
+        python3-venv \
+        python3-dev \ 
+        unzip \
+        zip \ 
+        xz-utils \
+        file \
+        patch \
+        tree \ 
+        lsof \
+        netcat-openbsd \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 bosun \
     && useradd --uid 10001 --gid bosun --create-home --shell /bin/bash bosun \

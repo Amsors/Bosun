@@ -19,6 +19,7 @@ type PodSnapshot struct {
 	Namespace   string              `json:"namespace"`
 	Name        string              `json:"name"`
 	Phase       string              `json:"phase"`
+	Resize      *PodResizeSnapshot  `json:"resize"`
 	NodeName    string              `json:"nodeName"`
 	Ready       bool                `json:"ready"`
 	Restarts    int32               `json:"restarts"`
@@ -31,6 +32,12 @@ type PodSnapshot struct {
 	SessionID   string              `json:"sessionID,omitempty"`
 	SessionName string              `json:"sessionName,omitempty"`
 	Username    string              `json:"username,omitempty"`
+}
+
+type PodResizeSnapshot struct {
+	State   string `json:"state"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type NodeSnapshot struct {
@@ -55,6 +62,11 @@ type ClusterSnapshot struct {
 	NodeMetricsAvailable bool           `json:"nodeMetricsAvailable"`
 	Nodes                []NodeSnapshot `json:"nodes"`
 	Pods                 []PodSnapshot  `json:"pods"`
+}
+
+type ResizeRequest struct {
+	CPUMillicores int64 `json:"cpuMillicores"`
+	MemoryBytes   int64 `json:"memoryBytes"`
 }
 
 type AgentOwner struct {

@@ -32,6 +32,18 @@ func TestMonitorRoutesKeepClusterPublicAndSessionAuthenticated(t *testing.T) {
 	if authenticated.Code != http.StatusOK {
 		t.Fatalf("session resources status=%d body=%s", authenticated.Code, authenticated.Body.String())
 	}
+
+	resize := doJSON(
+		t,
+		router,
+		http.MethodPut,
+		"/api/v1/admin/sessions/"+sessionID.String()+"/resources",
+		`{"cpuMillicores":700,"memoryBytes":1073741824}`,
+		nil,
+	)
+	if resize.Code != http.StatusOK {
+		t.Fatalf("public resize status=%d body=%s", resize.Code, resize.Body.String())
+	}
 }
 
 type fakeMonitorService struct{}
@@ -54,5 +66,16 @@ func (fakeMonitorService) Cluster(context.Context) (monitor.ClusterSnapshot, err
 		NodeMetricsAvailable: true,
 		Nodes:                []monitor.NodeSnapshot{},
 		Pods:                 []monitor.PodSnapshot{},
+	}, nil
+}
+
+func (fakeMonitorService) ResizeAgent(
+	context.Context,
+	uuid.UUID,
+	monitor.ResizeRequest,
+) (monitor.SessionSnapshot, error) {
+	return monitor.SessionSnapshot{
+		ObservedAt: time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
+		Pod:        monitor.PodSnapshot{},
 	}, nil
 }

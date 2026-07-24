@@ -27,6 +27,9 @@ let requestActive = false
 
 const cpuSamples = computed(() => samples.value.map((sample) => sample.cpu))
 const memorySamples = computed(() => samples.value.map((sample) => sample.memory))
+const agent = computed(() =>
+  snapshot.value?.pod.containers.find((container) => container.name === 'agent'),
+)
 
 function record(next: SessionResourceSnapshot): void {
   snapshot.value = next
@@ -91,6 +94,16 @@ onUnmounted(() => {
     <template v-else-if="snapshot">
       <p v-if="!snapshot.metricsAvailable" class="metrics-note">
         metrics-server 暂无该 Pod 的采样，requests 与 limits 仍可查看。
+      </p>
+      <p class="resource-limit-summary">
+        Agent 容器 Limit：
+        <strong>{{ formatCPU(agent?.limits.cpuMillicores || 0) }}</strong>
+        CPU /
+        <strong>{{ formatMemory(agent?.limits.memoryBytes || 0) }}</strong>
+        内存；图表中的 Limit 为包含平台 sidecar 的 Pod 总量。
+      </p>
+      <p v-if="snapshot.pod.resize" class="metrics-note" role="status">
+        Kubernetes 正在应用资源调整：{{ snapshot.pod.resize.reason || snapshot.pod.resize.state }}
       </p>
       <div class="resource-chart-grid">
         <ResourceChart

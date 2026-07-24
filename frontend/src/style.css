@@ -567,6 +567,13 @@ legend {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
+.resource-limit-summary {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+}
+.resource-limit-summary strong {
+  color: var(--ink);
+}
 .resource-chart {
   overflow: hidden;
   padding: 1rem;
@@ -795,7 +802,7 @@ legend {
   min-width: 16rem;
 }
 .pod-table td:last-child {
-  min-width: 13rem;
+  min-width: 17rem;
 }
 .pod-table td > strong,
 .pod-table td > span {
@@ -822,6 +829,36 @@ legend {
   padding: 3rem !important;
   color: var(--muted);
   text-align: center;
+}
+.resize-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(5rem, 1fr));
+  gap: 0.45rem;
+}
+.resize-form label {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.resize-form input {
+  min-width: 5rem;
+  padding: 0.45rem;
+}
+.resize-form button {
+  grid-column: 1 / -1;
+  padding: 0.5rem;
+}
+.resize-state,
+.resize-error {
+  grid-column: 1 / -1;
+  font-size: 0.68rem;
+}
+.resize-state {
+  color: #765507;
+}
+.resize-error {
+  color: var(--danger);
 }
 .phase[data-phase='Ready'],
 .phase[data-phase='Succeeded'] {
