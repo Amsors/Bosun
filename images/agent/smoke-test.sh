@@ -51,13 +51,25 @@ docker exec "${container}" test ! -w /etc/claude-code/managed-settings.json
 docker exec "${container}" test ! -w /usr/local/lib/bosun/hooks/session-start
 docker exec "${container}" test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
 docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/.claude.json)" = "10001:10001"
+docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/.claude/settings.json)" = "10001:10001"
 docker exec "${container}" jq -e '.hasCompletedOnboarding == true' /workspace/.bosun-home/.claude.json >/dev/null
+docker exec "${container}" jq -e \
+  '.permissions.defaultMode == "bypassPermissions" and
+   .skipDangerousModePermissionPrompt == true' \
+  /workspace/.bosun-home/.claude/settings.json >/dev/null
 docker exec "${container}" /bin/bash -c \
   'jq '\''. + {userSetting:"preserved"}'\'' "${HOME}/.claude.json" > "${HOME}/.claude.json.next" && mv "${HOME}/.claude.json.next" "${HOME}/.claude.json"'
+docker exec "${container}" /bin/bash -c \
+  'jq '\''. + {userSetting:"preserved"}'\'' "${HOME}/.claude/settings.json" > "${HOME}/.claude/settings.json.next" && mv "${HOME}/.claude/settings.json.next" "${HOME}/.claude/settings.json"'
 docker exec "${container}" /usr/local/bin/bosun-entrypoint true
 docker exec "${container}" jq -e \
   '.hasCompletedOnboarding == true and .userSetting == "preserved"' \
   /workspace/.bosun-home/.claude.json >/dev/null
+docker exec "${container}" jq -e \
+  '.permissions.defaultMode == "bypassPermissions" and
+   .skipDangerousModePermissionPrompt == true and
+   .userSetting == "preserved"' \
+  /workspace/.bosun-home/.claude/settings.json >/dev/null
 docker exec "${container}" jq -e \
   '.allowManagedHooksOnly == true and
    .hooks.SessionStart[0].hooks[0].command == "/usr/local/lib/bosun/hooks/session-start"' \
