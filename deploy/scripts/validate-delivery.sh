@@ -21,6 +21,25 @@ rendered="$(helm template bosun "${root}/deploy/chart" \
   --kube-version 1.36.0 \
   --include-crds)"
 
+allow_all_egress_rendered="$(helm template bosun "${root}/deploy/chart" \
+  --namespace bosun-platform \
+  --kube-version 1.36.0 \
+  --set egressProxy.allowAllDomains=true \
+  --set-json 'egressProxy.allowedDomains=[]')"
+
+if ! grep -q 'http_access allow CONNECT$' <<<"${allow_all_egress_rendered}"; then
+  echo "allow-all egress render does not permit HTTPS CONNECT" >&2
+  exit 1
+fi
+if grep -q 'acl allowed_domains dstdomain' <<<"${allow_all_egress_rendered}"; then
+  echo "allow-all egress render still contains a domain allowlist" >&2
+  exit 1
+fi
+if ! grep -q 'http_access allow CONNECT allowed_domains' <<<"${rendered}"; then
+  echo "default egress render does not enforce its domain allowlist" >&2
+  exit 1
+fi
+
 public_rendered="$(helm template bosun "${root}/deploy/chart" \
   --namespace bosun-platform \
   --kube-version 1.36.0 \

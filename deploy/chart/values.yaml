@@ -34,6 +34,8 @@ gateway:
   upstreamAuthScheme: ""
 
 egressProxy:
+  # 开启后允许通过代理访问任意域名；仍然只允许 HTTPS CONNECT 到 443 端口。
+  allowAllDomains: true
   # Squid dstdomain 以点前缀同时匹配域名本身及其子域名。
   allowedDomains:
     - .github.com

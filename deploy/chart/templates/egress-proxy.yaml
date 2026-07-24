@@ -1,5 +1,5 @@
-{{- if not .Values.egressProxy.allowedDomains }}
-{{- fail "egressProxy.allowedDomains must contain at least one Git hosting domain" }}
+{{- if and (not .Values.egressProxy.allowAllDomains) (not .Values.egressProxy.allowedDomains) }}
+{{- fail "egressProxy.allowedDomains must contain at least one domain when egressProxy.allowAllDomains=false" }}
 {{- end }}
 {{- range .Values.egressProxy.allowedDomains }}
 {{- if not (regexMatch "^\\.?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$" .) }}
@@ -19,10 +19,16 @@ data:
     visible_hostname bosun-egress-proxy
     acl CONNECT method CONNECT
     acl SSL_ports port 443
-    acl allowed_git_domains dstdomain{{- range .Values.egressProxy.allowedDomains }} {{ . }}{{- end }}
+    {{- if not .Values.egressProxy.allowAllDomains }}
+    acl allowed_domains dstdomain{{- range .Values.egressProxy.allowedDomains }} {{ . }}{{- end }}
+    {{- end }}
     http_access deny !CONNECT
     http_access deny !SSL_ports
-    http_access allow CONNECT allowed_git_domains
+    {{- if .Values.egressProxy.allowAllDomains }}
+    http_access allow CONNECT
+    {{- else }}
+    http_access allow CONNECT allowed_domains
+    {{- end }}
     http_access deny all
     cache deny all
     access_log stdio:/dev/stdout
@@ -45,7 +51,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/allowlist: {{ toJson .Values.egressProxy.allowedDomains | sha256sum }}
+        checksum/allowlist: {{ toJson (dict "allowAllDomains" .Values.egressProxy.allowAllDomains "allowedDomains" .Values.egressProxy.allowedDomains) | sha256sum }}
       labels:
         {{- include "bosun.labels" . | nindent 8 }}
         app.kubernetes.io/name: bosun-egress-proxy
