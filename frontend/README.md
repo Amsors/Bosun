@@ -24,8 +24,11 @@ make dev-forward
 
 ## 目录说明
 
-- `src/views/`：登录、注册、会话列表、创建与详情页面；
+- `src/views/`：登录、注册、会话列表、创建、详情与公开的全局资源监控页面；
 - `src/api/`：REST API contract 和 client；
 - `src/stores/`：认证与会话状态；
 - `src/components/terminal-panel.vue`：浏览器终端与重连逻辑；
+- `src/components/resource-usage-panel.vue`：会话 CPU、内存实时图表；最近 60 个采样点仅保存在页面内存；
 - `nginx.conf`：生产静态文件、API 和 WebSocket 反向代理配置。
+
+全局资源监控位于 `/admin`，每 5 秒刷新，可分别显示或隐藏 `kube-system`、`cert-manager`，也可只查看 Agent Pod。该页面按课程展示需求无需登录。

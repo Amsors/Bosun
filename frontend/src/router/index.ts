@@ -19,6 +19,12 @@ export const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('../views/admin-view.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/sessions',
       name: 'sessions',
       component: () => import('../views/session-list-view.vue'),

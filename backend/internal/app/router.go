@@ -70,6 +70,7 @@ type APIDeps struct {
 	Now                func() time.Time
 	Sessions           sessionService
 	Terminal           terminal.Service
+	Monitor            monitorService
 }
 
 // NewAPIRouter 构造 backend API 的完整路由（认证 + 当前用户）。
@@ -107,6 +108,12 @@ func NewAPIRouter(deps APIDeps) http.Handler {
 		group.POST("/:id/hibernate", sessions.transition(session.ActionHibernate))
 		group.POST("/:id/resume", sessions.transition(session.ActionResume))
 		group.POST("/:id/retry", sessions.transition(session.ActionRetry))
+	}
+	if deps.Monitor != nil {
+		metrics := &monitorHandler{svc: deps.Monitor}
+		v1.GET("/sessions/:id/resources", h.requireAuth, metrics.session)
+		// 课程项目展示页按需求公开访问，不施加登录鉴权。
+		v1.GET("/admin/cluster", metrics.cluster)
 	}
 	if deps.Terminal != nil {
 		v1.GET("/sessions/:id/terminal", func(c *gin.Context) {

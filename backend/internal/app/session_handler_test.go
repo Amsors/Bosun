@@ -145,6 +145,14 @@ func (f *fakeSessionService) Delete(_ context.Context, userID, _ uuid.UUID) (ses
 }
 
 func newSessionTestAPI(t *testing.T, sessions sessionService) (http.Handler, string, uuid.UUID) {
+	return newSessionMonitorTestAPI(t, sessions, nil)
+}
+
+func newSessionMonitorTestAPI(
+	t *testing.T,
+	sessions sessionService,
+	monitor monitorService,
+) (http.Handler, string, uuid.UUID) {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -176,6 +184,7 @@ func newSessionTestAPI(t *testing.T, sessions sessionService) (http.Handler, str
 		LoginByEmail: ratelimit.New(100, time.Minute, 1000),
 		Cookie:       CookieConfig{Name: "bosun_refresh", Path: "/api/v1/auth", TTL: time.Hour},
 		Sessions:     sessions,
+		Monitor:      monitor,
 	})
 	return router, token, userID
 }

@@ -104,6 +104,60 @@ export interface Session {
   createdAt: RFC3339Timestamp
 }
 
+export interface ResourceValues {
+  cpuMillicores: number
+  memoryBytes: number
+}
+
+export interface ContainerResourceSnapshot {
+  name: string
+  usage: ResourceValues | null
+  requests: ResourceValues
+  limits: ResourceValues
+}
+
+export interface PodResourceSnapshot {
+  namespace: string
+  name: string
+  phase: string
+  nodeName: string
+  ready: boolean
+  restarts: number
+  createdAt: RFC3339Timestamp
+  usage: ResourceValues | null
+  requests: ResourceValues
+  limits: ResourceValues
+  containers: ContainerResourceSnapshot[]
+  isAgent: boolean
+  sessionID?: UUID
+  sessionName?: string
+  username?: string
+}
+
+export interface NodeResourceSnapshot {
+  name: string
+  status: string
+  roles: string[]
+  kubeletVersion: string
+  usage: ResourceValues | null
+  capacity: ResourceValues
+  allocatable: ResourceValues
+}
+
+export interface SessionResourceSnapshot {
+  observedAt: RFC3339Timestamp
+  metricsAvailable: boolean
+  pod: PodResourceSnapshot
+}
+
+export interface ClusterResourceSnapshot {
+  observedAt: RFC3339Timestamp
+  podMetricsAvailable: boolean
+  nodeMetricsAvailable: boolean
+  nodes: NodeResourceSnapshot[]
+  pods: PodResourceSnapshot[]
+}
+
 export interface TerminalFrame {
   t: 'stdin' | 'stdout' | 'resize'
   d: string

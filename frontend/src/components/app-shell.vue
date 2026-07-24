@@ -16,8 +16,12 @@ async function signOut(): Promise<void> {
   <header class="topbar">
     <RouterLink class="brand" to="/sessions">Bosun</RouterLink>
     <nav aria-label="主导航">
-      <span>{{ auth.user?.email }}</span>
-      <button class="link-button" type="button" @click="signOut">退出</button>
+      <RouterLink to="/admin">全局监控</RouterLink>
+      <span v-if="auth.user">{{ auth.user.email }}</span>
+      <button v-if="auth.authenticated" class="link-button" type="button" @click="signOut">
+        退出
+      </button>
+      <RouterLink v-else to="/login">登录</RouterLink>
     </nav>
   </header>
   <main class="page"><slot /></main>
