@@ -96,6 +96,11 @@ func assertSecureSmallSessionPod(
 		pod.Spec.Containers[1].Resources.Requests.Cpu().Cmp(resource.MustParse("10m")) != 0 {
 		t.Fatalf("small CPU requests = agent %s proxy %s", pod.Spec.Containers[0].Resources.Requests.Cpu(), pod.Spec.Containers[1].Resources.Requests.Cpu())
 	}
+	if len(pod.Spec.Containers[0].ResizePolicy) != 2 ||
+		pod.Spec.Containers[0].ResizePolicy[0].RestartPolicy != corev1.NotRequired ||
+		pod.Spec.Containers[0].ResizePolicy[1].RestartPolicy != corev1.NotRequired {
+		t.Fatalf("agent resize policy = %#v", pod.Spec.Containers[0].ResizePolicy)
+	}
 	if got := tokenVolumeMounts(pod.Spec.Containers[0]); got != 0 {
 		t.Fatalf("agent token volume mounts = %d, want 0", got)
 	}

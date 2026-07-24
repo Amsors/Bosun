@@ -114,6 +114,7 @@ func NewAPIRouter(deps APIDeps) http.Handler {
 		v1.GET("/sessions/:id/resources", h.requireAuth, metrics.session)
 		// 课程项目展示页按需求公开访问，不施加登录鉴权。
 		v1.GET("/admin/cluster", metrics.cluster)
+		v1.PUT("/admin/sessions/:id/resources", metrics.resizeAgent)
 	}
 	if deps.Terminal != nil {
 		v1.GET("/sessions/:id/terminal", func(c *gin.Context) {

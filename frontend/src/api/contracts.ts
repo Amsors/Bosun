@@ -116,10 +116,17 @@ export interface ContainerResourceSnapshot {
   limits: ResourceValues
 }
 
+export interface PodResizeSnapshot {
+  state: 'PodResizePending' | 'PodResizeInProgress' | string
+  reason?: string
+  message?: string
+}
+
 export interface PodResourceSnapshot {
   namespace: string
   name: string
   phase: string
+  resize: PodResizeSnapshot | null
   nodeName: string
   ready: boolean
   restarts: number
@@ -156,6 +163,11 @@ export interface ClusterResourceSnapshot {
   nodeMetricsAvailable: boolean
   nodes: NodeResourceSnapshot[]
   pods: PodResourceSnapshot[]
+}
+
+export interface ResizeAgentResourcesRequest {
+  cpuMillicores: number
+  memoryBytes: number
 }
 
 export interface TerminalFrame {

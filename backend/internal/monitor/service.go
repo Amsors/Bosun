@@ -17,6 +17,13 @@ import (
 
 const requestTimeout = 8 * time.Second
 
+const agentContainerName = "agent"
+
+var (
+	ErrInvalidResize = errors.New("invalid agent resource limits")
+	ErrNotRunning    = errors.New("agent Pod is not running")
+)
+
 type SessionStore interface {
 	Get(context.Context, uuid.UUID, uuid.UUID) (session.Session, error)
 }
@@ -128,6 +135,55 @@ func (s *Service) Cluster(ctx context.Context) (ClusterSnapshot, error) {
 	return result, nil
 }
 
+func (s *Service) ResizeAgent(
+	ctx context.Context,
+	sessionID uuid.UUID,
+	request ResizeRequest,
+) (SessionSnapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	pods, err := s.source.ListPods(ctx)
+	if err != nil {
+		return SessionSnapshot{}, fmt.Errorf("list Pods before resize: %w", err)
+	}
+	pod := agentPodForSession(pods, sessionID.String())
+	if pod == nil {
+		return SessionSnapshot{}, session.ErrNotFound
+	}
+	if pod.Status.Phase != corev1.PodRunning || !pod.DeletionTimestamp.IsZero() {
+		return SessionSnapshot{}, ErrNotRunning
+	}
+	agent := findContainer(pod, agentContainerName)
+	if agent == nil {
+		return SessionSnapshot{}, session.ErrNotFound
+	}
+	limits := Resources(request)
+	if err := validateResize(agent, limits); err != nil {
+		return SessionSnapshot{}, err
+	}
+	updated, err := s.source.ResizePod(ctx, pod.Namespace, pod.Name, agentContainerName, limits)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return SessionSnapshot{}, session.ErrNotFound
+		}
+		if apierrors.IsInvalid(err) {
+			return SessionSnapshot{}, fmt.Errorf("%w: %v", ErrInvalidResize, err)
+		}
+		return SessionSnapshot{}, fmt.Errorf("resize agent Pod: %w", err)
+	}
+	metric, metricErr := s.source.GetPodMetric(ctx, updated.Namespace, updated.Name)
+	available := metricErr == nil
+	var metricPtr *PodMetric
+	if available {
+		metricPtr = &metric
+	}
+	return SessionSnapshot{
+		ObservedAt:       s.now(),
+		MetricsAvailable: available,
+		Pod:              snapshotPod(updated, metricPtr, nil),
+	}, nil
+}
+
 func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwner) PodSnapshot {
 	result := PodSnapshot{
 		Namespace: pod.Namespace,
@@ -140,6 +196,7 @@ func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwne
 	if !pod.DeletionTimestamp.IsZero() {
 		result.Phase = "Terminating"
 	}
+	result.Resize = podResizeSnapshot(pod)
 	for _, status := range pod.Status.ContainerStatuses {
 		result.Restarts += status.RestartCount
 	}
@@ -175,6 +232,48 @@ func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwne
 		result.SessionName = owner.SessionName
 	}
 	return result
+}
+
+func agentPodForSession(pods []corev1.Pod, sessionID string) *corev1.Pod {
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Labels["bosun.io/session"] == sessionID &&
+			pod.Labels["app.kubernetes.io/managed-by"] == "bosun" {
+			return pod
+		}
+	}
+	return nil
+}
+
+func validateResize(container *corev1.Container, limits Resources) error {
+	if limits.CPUMillicores <= 0 || limits.MemoryBytes <= 0 {
+		return ErrInvalidResize
+	}
+	requests := resourceList(container.Resources.Requests)
+	if limits.CPUMillicores < requests.CPUMillicores ||
+		limits.MemoryBytes < requests.MemoryBytes {
+		return fmt.Errorf("%w: limits must be greater than or equal to requests", ErrInvalidResize)
+	}
+	return nil
+}
+
+func podResizeSnapshot(pod *corev1.Pod) *PodResizeSnapshot {
+	for _, conditionType := range []corev1.PodConditionType{
+		corev1.PodResizeInProgress,
+		corev1.PodResizePending,
+	} {
+		for i := range pod.Status.Conditions {
+			condition := &pod.Status.Conditions[i]
+			if condition.Type == conditionType && condition.Status == corev1.ConditionTrue {
+				return &PodResizeSnapshot{
+					State:   string(condition.Type),
+					Reason:  condition.Reason,
+					Message: condition.Message,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func snapshotNode(node *corev1.Node, usage *Resources) NodeSnapshot {

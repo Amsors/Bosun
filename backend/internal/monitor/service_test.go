@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -111,6 +112,66 @@ func TestSessionAllowsResourceSpecWhenMetricsAreUnavailable(t *testing.T) {
 	}
 }
 
+func TestResizeAgentUsesPodResizeAndReturnsUpdatedLimits(t *testing.T) {
+	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
+	pod := agentPod()
+	pod.Labels["bosun.io/session"] = sessionID.String()
+	source := &fakeSource{
+		pods:         []corev1.Pod{pod},
+		podMetricErr: errors.New("metrics decode failed after successful resize"),
+	}
+	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	result, err := service.ResizeAgent(context.Background(), sessionID, ResizeRequest{
+		CPUMillicores: 700,
+		MemoryBytes:   1536 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("ResizeAgent() error = %v", err)
+	}
+	if source.resizeContainer != agentContainerName {
+		t.Fatalf("resize container = %q", source.resizeContainer)
+	}
+	agent := findContainer(&source.resizedPod, agentContainerName)
+	if agent == nil ||
+		agent.Resources.Limits.Cpu().MilliValue() != 700 ||
+		agent.Resources.Limits.Memory().Value() != 1536*1024*1024 {
+		t.Fatalf("resized agent = %#v", agent)
+	}
+	if result.Pod.Limits.CPUMillicores != 750 ||
+		result.Pod.Limits.MemoryBytes != 1600*1024*1024 {
+		t.Fatalf("aggregate limits = %#v", result.Pod.Limits)
+	}
+	if result.MetricsAvailable {
+		t.Fatal("resize response unexpectedly reported unavailable metrics as available")
+	}
+}
+
+func TestResizeAgentRejectsLimitsBelowRequests(t *testing.T) {
+	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
+	pod := agentPod()
+	pod.Labels["bosun.io/session"] = sessionID.String()
+	source := &fakeSource{pods: []corev1.Pod{pod}}
+	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = service.ResizeAgent(context.Background(), sessionID, ResizeRequest{
+		CPUMillicores: 200,
+		MemoryBytes:   1024 * 1024 * 1024,
+	})
+	if !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("ResizeAgent() error = %v, want ErrInvalidResize", err)
+	}
+	if source.resizeContainer != "" {
+		t.Fatal("ResizePod was called for an invalid request")
+	}
+}
+
 type fakeSessionStore struct {
 	record session.Session
 	err    error
@@ -127,15 +188,17 @@ func (f fakeOwners) ListAgentOwners(context.Context) (map[string]AgentOwner, err
 }
 
 type fakeSource struct {
-	pod           corev1.Pod
-	pods          []corev1.Pod
-	nodes         []corev1.Node
-	podMetric     PodMetric
-	podMetricErr  error
-	podMetrics    map[string]PodMetric
-	podMetricsErr error
-	nodeMetrics   map[string]Resources
-	nodeMetricErr error
+	pod             corev1.Pod
+	pods            []corev1.Pod
+	nodes           []corev1.Node
+	podMetric       PodMetric
+	podMetricErr    error
+	podMetrics      map[string]PodMetric
+	podMetricsErr   error
+	nodeMetrics     map[string]Resources
+	nodeMetricErr   error
+	resizeContainer string
+	resizedPod      corev1.Pod
 }
 
 func (f *fakeSource) GetPod(context.Context, string, string) (*corev1.Pod, error) {
@@ -144,6 +207,27 @@ func (f *fakeSource) GetPod(context.Context, string, string) (*corev1.Pod, error
 
 func (f *fakeSource) ListPods(context.Context) ([]corev1.Pod, error) {
 	return f.pods, nil
+}
+
+func (f *fakeSource) ResizePod(
+	_ context.Context,
+	namespace, name, containerName string,
+	limits Resources,
+) (*corev1.Pod, error) {
+	f.resizeContainer = containerName
+	for i := range f.pods {
+		if f.pods[i].Namespace != namespace || f.pods[i].Name != name {
+			continue
+		}
+		f.resizedPod = *f.pods[i].DeepCopy()
+		container := findContainer(&f.resizedPod, containerName)
+		container.Resources.Limits[corev1.ResourceCPU] =
+			*resource.NewMilliQuantity(limits.CPUMillicores, resource.DecimalSI)
+		container.Resources.Limits[corev1.ResourceMemory] =
+			*resource.NewQuantity(limits.MemoryBytes, resource.BinarySI)
+		return f.resizedPod.DeepCopy(), nil
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, name)
 }
 
 func (f *fakeSource) ListNodes(context.Context) ([]corev1.Node, error) {

@@ -594,6 +594,10 @@ func (r *AgentSessionReconciler) desiredPod(
 					Name:            "agent",
 					Image:           r.AgentImage,
 					ImagePullPolicy: r.AgentPullPolicy,
+					ResizePolicy: []corev1.ContainerResizePolicy{
+						{ResourceName: corev1.ResourceCPU, RestartPolicy: corev1.NotRequired},
+						{ResourceName: corev1.ResourceMemory, RestartPolicy: corev1.NotRequired},
+					},
 					Env: []corev1.EnvVar{
 						{Name: "BOSUN_SESSION_ID", Value: session.Spec.SessionID},
 						{Name: "BOSUN_AGENT_IMAGE", Value: r.AgentImage},
