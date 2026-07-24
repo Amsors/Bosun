@@ -21,20 +21,24 @@ state_dir=/workspace/.bosun-state
 recovery_file="${state_dir}/recovery.json"
 workspace_path=/workspace
 
-mkdir -p "${HOME}" "${TMUX_TMPDIR}" "${state_dir}/runtime/tmp" "${state_dir}/runtime/tmux"
-
+claude_defaults=/usr/local/share/bosun/claude-defaults
 claude_config="${HOME}/.claude.json"
+claude_settings_dir="${HOME}/.claude"
+claude_settings="${claude_settings_dir}/settings.json"
+
+mkdir -p \
+  "${HOME}" \
+  "${claude_settings_dir}" \
+  "${TMUX_TMPDIR}" \
+  "${state_dir}/runtime/tmp" \
+  "${state_dir}/runtime/tmux"
+
 if [[ ! -e "${claude_config}" ]]; then
-  printf '%s\n' '{"hasCompletedOnboarding":true}' > "${claude_config}"
-else
-  if jq -e 'type == "object"' "${claude_config}" >/dev/null; then
-    config_tmp="${claude_config}.tmp.$$"
-    jq '. + {hasCompletedOnboarding:true}' "${claude_config}" > "${config_tmp}"
-    chmod --reference="${claude_config}" "${config_tmp}" 2>/dev/null || chmod 0600 "${config_tmp}"
-    mv -f "${config_tmp}" "${claude_config}"
-  else
-    printf '[Bosun] Existing .claude.json is invalid; preserving it unchanged.\n' >&2
-  fi
+  install -m 0600 "${claude_defaults}/.claude.json" "${claude_config}"
+fi
+
+if [[ ! -e "${claude_settings}" ]]; then
+  install -m 0600 "${claude_defaults}/settings.json" "${claude_settings}"
 fi
 
 if [[ -f "${recovery_file}" ]] && /usr/local/bin/bosun-runtime-control validate; then

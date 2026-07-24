@@ -1,0 +1,12 @@
+{
+  "hasCompletedOnboarding": true,
+  "customApiKeyResponses": {
+    "approved": ["sk-xxxx"],
+    "rejected": []
+  },
+  "projects": {
+    "/workspace": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
