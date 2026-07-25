@@ -6,12 +6,12 @@
 
 | 节点名 | 位置与用途 | labels | 调度内容 |
 |---|---|---|---|
-| `node-sg-control` | 新加坡本地机，k3s server | `region=sg`, `role=core` | API、gateway、operator、PostgreSQL、cert-manager |
+| `node-hk-control` | 香港云主机，k3s server | `region=hk`, `role=core` | API、gateway、operator、PostgreSQL、cert-manager |
 | `node-hk-worker` | 香港大内存云主机，k3s agent | `region=hk`, `role=worker` | 所有 `AgentSession` |
 | `node-hk-worker-1` | 香港大内存云主机，k3s agent | `region=hk`, `role=worker` | 所有 `AgentSession` |
 | `node-hk-edge` | 香港小内存云主机，k3s agent | `region=hk`, `role=edge` | Traefik、ServiceLB、frontend |
 
-这是单 control plane，不具备 HA。新加坡机故障时整个集群无法管理，但对当前项目规模是可接受的简化。`role=core` 节点不添加 control-plane taint，因为当前 Helm chart 明确要求平台服务和 PostgreSQL 运行在该节点。
+这是单 control plane，不具备 HA。`role=core` 节点不添加 control-plane taint，因为当前 Helm chart 明确要求平台服务和 PostgreSQL 运行在该节点。
 
 四台机器均使用 Ubuntu 24.04 LTS x86_64，并使用 SSD。edge 节点理论上 1 GiB 可以启动，但 OS、k3s agent、Traefik 和 frontend 同时运行时容易 OOM，建议至少 2 GiB。
 
@@ -57,13 +57,13 @@ sudo swapoff -a
 curl -fsSL https://tailscale.com/install.sh | sh
 ```
 
-同时在 `/etc/fstab` 中注释 swap 行，避免重启后重新开启。Docker 不需要安装，k3s 自带 containerd。新加坡本地机必须关闭自动休眠。
+同时在 `/etc/fstab` 中注释 swap 行，避免重启后重新开启。Docker 不需要安装，k3s 自带 containerd。
 
 依次在四台机器上登录 Tailscale：
 
 ```bash
-# 新加坡机
-sudo tailscale up --hostname=node-sg-control
+# control plane机
+sudo tailscale up --hostname=node-hk-control
 
 # 香港 worker
 sudo tailscale up --hostname=node-hk-worker
@@ -117,7 +117,7 @@ resolv-conf: /etc/rancher/k3s/resolv.conf
 sudo systemctl restart k3s-agent
 ```
 
-在新加坡 control plane 执行：
+在control plane 执行：
 
 ```bash
 sudo systemctl restart k3s
@@ -145,19 +145,19 @@ sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 ```
 
-## 3. 安装新加坡 control plane
+## 3. 安装 control plane
 
-在新加坡机执行：
+执行：
 
 ```bash
 CONTROL_TS_IP="$(tailscale ip -4)"
 curl -sfL https://get.k3s.io | sudo env INSTALL_K3S_CHANNEL=stable sh -s - server \
-  --node-name node-sg-control \
+  --node-name node-hk-control \
   --node-ip "${CONTROL_TS_IP}" \
   --advertise-address "${CONTROL_TS_IP}" \
   --tls-san "${CONTROL_TS_IP}" \
   --flannel-iface tailscale0 \
-  --node-label region=sg \
+  --node-label region=hk \
   --node-label role=core \
   --secrets-encryption
 ```
@@ -166,7 +166,7 @@ curl -sfL https://get.k3s.io | sudo env INSTALL_K3S_CHANNEL=stable sh -s - serve
 
 ```bash
 sudo systemctl status k3s --no-pager
-sudo k3s kubectl wait node/node-sg-control \
+sudo k3s kubectl wait node/node-hk-control \
   --for=condition=Ready --timeout=180s
 sudo k3s --version
 sudo k3s secrets-encrypt status
@@ -295,7 +295,7 @@ base64 --wrap=0 "${OPS_SECRET_DIR}/kubeconfig"
 
 设置 GitHub Secrets 后删除这个临时目录。不要在 Bosun 仓库目录生成这些文件。
 
-生产 workflow 需要 `[self-hosted, linux, bosun-deploy]` runner。学生项目可直接把 runner 安装在新加坡 control plane 的独立非 root 账号下，按 GitHub `Settings → Actions → Runners` 页面当前显示的命令注册，并添加 `bosun-deploy` label。首次部署时以前台 `./run.sh` 运行即可。
+生产 workflow 需要 `[self-hosted, linux, bosun-deploy]` runner。学按 GitHub `Settings → Actions → Runners` 页面当前显示的命令注册，并添加 `bosun-deploy` label。首次部署时以前台 `./run.sh` 运行即可。
 
 ## 6. 创建数据库 Secret
 

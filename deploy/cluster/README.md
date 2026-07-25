@@ -37,12 +37,12 @@ Pod、ServiceAccount 和 PVC；随后删除 `UserEnvironment` 与 `bosun-u-*` na
 
 ## k3s server 参数
 
-新加坡 core 节点 `node-sg-control` 运行唯一的 k3s server。安装或重建时必须至少使用以下参数：
+core 节点 `node-hk-control` 运行唯一的 k3s server。安装或重建时必须至少使用以下参数：
 
 ```text
 server \
-  --node-name node-sg-control \
-  --node-label region=sg \
+  --node-name node-hk-control \
+  --node-label region=hk \
   --node-label role=core \
   --secrets-encryption
 ```
@@ -63,7 +63,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 
 | 节点 | 必须存在的 labels | taint |
 |---|---|---|
-| `node-sg-control` | `region=sg`, `role=core` | 无 |
+| `node-hk-control` | `region=hk`, `role=core` | 无 |
 | `node-hk-worker` | `region=hk`, `role=worker` | 无 |
 | `node-hk-worker-1` | `region=hk`, `role=worker` | 无 |
 | `node-hk-edge` | `region=hk`, `role=edge` | `bosun.io/edge=true:NoSchedule` |
@@ -71,7 +71,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 在已加入集群的节点上幂等执行：
 
 ```bash
-kubectl label node node-sg-control region=sg role=core --overwrite
+kubectl label node node-hk-control region=hk role=core --overwrite
 kubectl label node node-hk-worker region=hk role=worker --overwrite
 kubectl label node node-hk-edge region=hk role=edge --overwrite
 kubectl taint node node-hk-edge bosun.io/edge=true:NoSchedule --overwrite
