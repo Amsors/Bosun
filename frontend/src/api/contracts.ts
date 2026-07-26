@@ -47,7 +47,6 @@ export const apiErrorCodes = {
 
 export type EnvironmentPhase = 'Pending' | 'Ready' | 'Failed'
 export type DesiredState = 'Running' | 'Hibernated'
-export type SessionTier = 'small' | 'medium'
 export type SessionPriority = 'low' | 'normal' | 'high'
 export type Runtime = 'claude-code'
 export type ProviderMode = 'platform' | 'byok'
@@ -82,7 +81,6 @@ export interface ProviderSelection {
 export interface CreateSessionRequest {
   name: string
   priority: SessionPriority
-  tier: SessionTier
   runtime: Runtime
   provider: ProviderSelection
   storagePolicy: StoragePolicy
@@ -93,7 +91,6 @@ export interface Session {
   name: string
   priority: SessionPriority
   desiredState: DesiredState
-  tier: SessionTier
   runtime: Runtime
   provider: ProviderSelection
   storagePolicy: StoragePolicy

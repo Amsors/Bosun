@@ -533,10 +533,6 @@ func (r *AgentSessionReconciler) getPVC(
 }
 
 func desiredPVC(session *bosunv1alpha1.AgentSession, storageClass string) *corev1.PersistentVolumeClaim {
-	size := "5Gi"
-	if session.Spec.Tier == bosunv1alpha1.SessionTierMedium {
-		size = "10Gi"
-	}
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sessionidentity.PVCName(session.Spec.SessionID), Namespace: session.Namespace,
@@ -545,7 +541,7 @@ func desiredPVC(session *bosunv1alpha1.AgentSession, storageClass string) *corev
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(size)},
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
 			},
 			StorageClassName: &storageClass,
 		},
@@ -556,7 +552,7 @@ func (r *AgentSessionReconciler) desiredPod(
 	session *bosunv1alpha1.AgentSession,
 	pvcName string,
 ) *corev1.Pod {
-	agentRequests, agentLimits := tierAgentResources(session.Spec.Tier)
+	agentRequests, agentLimits := resourcepolicy.ResourceRequirements()
 	scaling := session.Spec.EffectiveResourceScaling()
 	if scaling.Mode == bosunv1alpha1.ResourceScalingModeManual && scaling.ManualLimits != nil {
 		agentLimits[corev1.ResourceCPU] =
@@ -710,14 +706,6 @@ func agentTolerations() []corev1.Toleration {
 	}
 }
 
-func tierAgentResources(tier bosunv1alpha1.SessionTier) (corev1.ResourceList, corev1.ResourceList) {
-	requests, limits, err := resourcepolicy.ResourceRequirements(tier)
-	if err != nil {
-		panic(err)
-	}
-	return requests, limits
-}
-
 func restrictedContainerSecurityContext(noPrivilege, readOnly *bool) *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: noPrivilege,
@@ -866,7 +854,7 @@ func validateAgentSession(session *bosunv1alpha1.AgentSession) error {
 		if scaling.ManualLimits == nil {
 			return fmt.Errorf("spec.resourceScaling.manualLimits is required in Manual mode")
 		}
-		if err := resourcepolicy.ValidateManualLimits(session.Spec.Tier, *scaling.ManualLimits); err != nil {
+		if err := resourcepolicy.ValidateManualLimits(*scaling.ManualLimits); err != nil {
 			return fmt.Errorf("invalid manual resource limits: %w", err)
 		}
 	default:

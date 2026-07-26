@@ -39,7 +39,7 @@ func TestMonitorRoutesKeepClusterPublicAndSessionAuthenticated(t *testing.T) {
 		router,
 		http.MethodPut,
 		"/api/v1/admin/sessions/"+sessionID.String()+"/resources",
-		`{"cpuMillicores":700,"memoryBytes":1073741824}`,
+		`{"cpuMillicores":700,"memoryBytes":3221225472}`,
 		nil,
 	)
 	if resize.Code != http.StatusAccepted {
@@ -58,8 +58,8 @@ func TestMonitorRoutesKeepClusterPublicAndSessionAuthenticated(t *testing.T) {
 	}
 }
 
-func TestManualResourceIntentOutsideTierBoundsReturnsUnprocessableEntity(t *testing.T) {
-	service := fakeMonitorService{resizeErr: fmt.Errorf("%w: outside tier bounds", monitor.ErrInvalidResize)}
+func TestManualResourceIntentOutsideSharedBoundsReturnsUnprocessableEntity(t *testing.T) {
+	service := fakeMonitorService{resizeErr: fmt.Errorf("%w: outside resource bounds", monitor.ErrInvalidResize)}
 	router, _, _ := newSessionMonitorTestAPI(t, &fakeSessionService{}, service)
 	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
 

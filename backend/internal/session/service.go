@@ -126,7 +126,7 @@ func (s *Service) Create(
 		rec := Session{
 			ID: sessionID, UserID: userID, Name: name, Priority: req.Priority,
 			CRNamespace: userenv.Namespace(userID.String()),
-			CRName:      sessionidentity.CRName(sessionID.String()), Tier: req.Tier, Runtime: req.Runtime,
+			CRName:      sessionidentity.CRName(sessionID.String()), Runtime: req.Runtime,
 			Provider: Provider{Mode: req.Provider.Mode}, StoragePolicy: req.StoragePolicy,
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
 			PhaseReason: "CreateRequested", Conditions: nil, LastActiveAt: &now,
@@ -137,7 +137,7 @@ func (s *Service) Create(
 			return err
 		}
 		event, err := newEvent(rec.ID, "session.created", map[string]any{
-			"name": rec.Name, "priority": rec.Priority, "tier": rec.Tier,
+			"name": rec.Name, "priority": rec.Priority,
 			"runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
 		}, now)
 		if err != nil {
@@ -270,7 +270,6 @@ func validCreateRequest(req CreateRequest) bool {
 		utf8.RuneCountInString(name) >= 1 &&
 		utf8.RuneCountInString(name) <= 80 &&
 		(req.Priority == "low" || req.Priority == "normal" || req.Priority == "high") &&
-		(req.Tier == "small" || req.Tier == "medium") &&
 		req.Runtime == "claude-code" &&
 		req.Provider.Mode == "platform" &&
 		req.Provider.CredentialID == "" &&

@@ -171,7 +171,6 @@ func agentSessionFromDomain(session Session) *bosunv1alpha1.AgentSession {
 			SessionID: session.ID.String(), UserID: session.UserID.String(),
 			DesiredState: bosunv1alpha1.DesiredState(session.DesiredState),
 			ResumeNonce:  session.ResumeNonce.String(),
-			Tier:         bosunv1alpha1.SessionTier(session.Tier),
 			Runtime:      bosunv1alpha1.Runtime(session.Runtime),
 			Provider: bosunv1alpha1.ProviderSpec{
 				Mode: bosunv1alpha1.ProviderMode(session.Provider.Mode),

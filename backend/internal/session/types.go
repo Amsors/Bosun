@@ -34,7 +34,6 @@ type Session struct {
 	Priority          string
 	CRNamespace       string
 	CRName            string
-	Tier              string
 	Runtime           string
 	Provider          Provider
 	StoragePolicy     string
@@ -54,7 +53,6 @@ type Session struct {
 type CreateRequest struct {
 	Name          string          `json:"name"`
 	Priority      string          `json:"priority"`
-	Tier          string          `json:"tier"`
 	Runtime       string          `json:"runtime"`
 	Provider      ProviderRequest `json:"provider"`
 	StoragePolicy string          `json:"storagePolicy"`

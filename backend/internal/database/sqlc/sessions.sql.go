@@ -27,14 +27,14 @@ func (q *Queries) CountSessionsForUser(ctx context.Context, userID uuid.UUID) (i
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO bosun.sessions (
-    id, user_id, cr_namespace, cr_name, display_name, priority, tier, runtime, provider_mode,
+    id, user_id, cr_namespace, cr_name, display_name, priority, runtime, provider_mode,
     provider_credential_id, storage_policy, desired_state, resume_nonce,
     phase, phase_reason, conditions, last_active_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-    $12, $13, $14, $15, $16, $17, $18, $18
+    $12, $13, $14, $15, $16, $17, $17
 )
-RETURNING id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+RETURNING id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 `
 
 type CreateSessionParams struct {
@@ -44,7 +44,6 @@ type CreateSessionParams struct {
 	CrName               string     `json:"cr_name"`
 	DisplayName          string     `json:"display_name"`
 	Priority             string     `json:"priority"`
-	Tier                 string     `json:"tier"`
 	Runtime              string     `json:"runtime"`
 	ProviderMode         string     `json:"provider_mode"`
 	ProviderCredentialID *uuid.UUID `json:"provider_credential_id"`
@@ -66,7 +65,6 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		arg.CrName,
 		arg.DisplayName,
 		arg.Priority,
-		arg.Tier,
 		arg.Runtime,
 		arg.ProviderMode,
 		arg.ProviderCredentialID,
@@ -85,7 +83,6 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,
@@ -142,7 +139,7 @@ func (q *Queries) GetGatewaySessionIdentity(ctx context.Context, arg GetGatewayS
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+SELECT id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 FROM bosun.sessions
 WHERE id = $1
 `
@@ -155,7 +152,6 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (BosunSessio
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,
@@ -178,7 +174,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (BosunSessio
 }
 
 const getSessionForUser = `-- name: GetSessionForUser :one
-SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+SELECT id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 FROM bosun.sessions
 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 `
@@ -196,7 +192,6 @@ func (q *Queries) GetSessionForUser(ctx context.Context, arg GetSessionForUserPa
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,
@@ -243,7 +238,7 @@ func (q *Queries) InsertSessionEvent(ctx context.Context, arg InsertSessionEvent
 }
 
 const listDeletingSessions = `-- name: ListDeletingSessions :many
-SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+SELECT id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 FROM bosun.sessions
 WHERE deleted_at IS NOT NULL AND phase_reason <> 'CleanupComplete'
 ORDER BY deleted_at
@@ -264,7 +259,6 @@ func (q *Queries) ListDeletingSessions(ctx context.Context, limit int32) ([]Bosu
 			&i.UserID,
 			&i.CrNamespace,
 			&i.CrName,
-			&i.Tier,
 			&i.Runtime,
 			&i.ProviderMode,
 			&i.ProviderCredentialID,
@@ -294,7 +288,7 @@ func (q *Queries) ListDeletingSessions(ctx context.Context, limit int32) ([]Bosu
 }
 
 const listPendingSessions = `-- name: ListPendingSessions :many
-SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+SELECT id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 FROM bosun.sessions
 WHERE deleted_at IS NULL AND phase = 'Pending'
 ORDER BY
@@ -317,7 +311,6 @@ func (q *Queries) ListPendingSessions(ctx context.Context, limit int32) ([]Bosun
 			&i.UserID,
 			&i.CrNamespace,
 			&i.CrName,
-			&i.Tier,
 			&i.Runtime,
 			&i.ProviderMode,
 			&i.ProviderCredentialID,
@@ -347,7 +340,7 @@ func (q *Queries) ListPendingSessions(ctx context.Context, limit int32) ([]Bosun
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+SELECT id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 FROM bosun.sessions
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -374,7 +367,6 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, arg ListSessionsForUs
 			&i.UserID,
 			&i.CrNamespace,
 			&i.CrName,
-			&i.Tier,
 			&i.Runtime,
 			&i.ProviderMode,
 			&i.ProviderCredentialID,
@@ -434,7 +426,7 @@ SET phase = $2,
     updated_at = $7,
     version = version + 1
 WHERE id = $1 AND cr_resource_version < $6
-RETURNING id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+RETURNING id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 `
 
 type ProjectSessionStatusParams struct {
@@ -463,7 +455,6 @@ func (q *Queries) ProjectSessionStatus(ctx context.Context, arg ProjectSessionSt
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,
@@ -494,7 +485,7 @@ SET desired_state = 'Hibernated',
     updated_at = $3,
     version = version + 1
 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
-RETURNING id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+RETURNING id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 `
 
 type SoftDeleteSessionParams struct {
@@ -511,7 +502,6 @@ func (q *Queries) SoftDeleteSession(ctx context.Context, arg SoftDeleteSessionPa
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,
@@ -541,7 +531,7 @@ SET desired_state = $3,
     updated_at = $6,
     version = version + 1
 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL AND version = $7
-RETURNING id, user_id, cr_namespace, cr_name, tier, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
+RETURNING id, user_id, cr_namespace, cr_name, runtime, provider_mode, provider_credential_id, storage_policy, desired_state, resume_nonce, phase, phase_reason, conditions, last_active_at, cr_resource_version, created_at, updated_at, deleted_at, version, display_name, priority
 `
 
 type UpdateSessionDesiredStateParams struct {
@@ -570,7 +560,6 @@ func (q *Queries) UpdateSessionDesiredState(ctx context.Context, arg UpdateSessi
 		&i.UserID,
 		&i.CrNamespace,
 		&i.CrName,
-		&i.Tier,
 		&i.Runtime,
 		&i.ProviderMode,
 		&i.ProviderCredentialID,

@@ -12,7 +12,7 @@ describe('monitor API', () => {
 
     await monitorApi.cluster()
     await monitorApi.session('access-token', 'session/id')
-    await monitorApi.resizeAgent('session/id', { cpuMillicores: 700, memoryBytes: 1073741824 })
+    await monitorApi.resizeAgent('session/id', { cpuMillicores: 700, memoryBytes: 3221225472 })
     await monitorApi.restoreAuto('session/id')
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -35,7 +35,7 @@ describe('monitor API', () => {
       expect.objectContaining({
         method: 'PUT',
         headers: expect.not.objectContaining({ Authorization: expect.anything() }),
-        body: JSON.stringify({ cpuMillicores: 700, memoryBytes: 1073741824 }),
+        body: JSON.stringify({ cpuMillicores: 700, memoryBytes: 3221225472 }),
       }),
     )
     expect(fetch).toHaveBeenNthCalledWith(

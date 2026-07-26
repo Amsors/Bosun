@@ -198,7 +198,7 @@ func (s *Service) ResizeAgent(
 		return ResourceScalingResponse{}, session.ErrNotFound
 	}
 	limits := bosunv1alpha1.ResourceValues(request)
-	if err := resourcepolicy.ValidateManualLimits(cr.Spec.Tier, limits); err != nil {
+	if err := resourcepolicy.ValidateManualLimits(limits); err != nil {
 		return ResourceScalingResponse{}, fmt.Errorf("%w: %v", ErrInvalidResize, err)
 	}
 	updated, err := s.source.UpdateResourceScaling(
@@ -355,12 +355,11 @@ func snapshotAgentScaling(
 		limits := Resources(*effective.ManualLimits)
 		result.ManualLimits = &limits
 	}
-	if policy, err := resourcepolicy.ForTier(cr.Spec.Tier); err == nil {
-		result.MinCPUMillicores = policy.MinCPULimit
-		result.MaxCPUMillicores = policy.MaxCPULimit
-		result.MinMemoryBytes = policy.MinMemoryLimitBytes
-		result.MaxMemoryBytes = policy.MaxMemoryLimitBytes
-	}
+	policy := resourcepolicy.Policy()
+	result.MinCPUMillicores = policy.MinCPULimit
+	result.MaxCPUMillicores = policy.MaxCPULimit
+	result.MinMemoryBytes = policy.MinMemoryLimitBytes
+	result.MaxMemoryBytes = policy.MaxMemoryLimitBytes
 	if cr.Status.ResourceScaling != nil {
 		result.LoadClass = string(cr.Status.ResourceScaling.LoadClass)
 		result.RecommendedCPUMillicores = cr.Status.ResourceScaling.RecommendedCPUMillicores

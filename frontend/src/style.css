@@ -538,7 +538,7 @@ legend {
   margin-bottom: 1rem;
   font-weight: 800;
 }
-.tier {
+.priority-option {
   display: flex;
   gap: 1rem;
   padding: 1rem;
@@ -546,14 +546,14 @@ legend {
   border-radius: 0.65rem;
   background: #fffdf6;
 }
-.tier input {
+.priority-option input {
   width: auto;
 }
-.tier span {
+.priority-option span {
   display: grid;
   gap: 0.25rem;
 }
-.tier small {
+.priority-option small {
   color: var(--muted);
 }
 .priority-option:has(input:checked) {
@@ -590,16 +590,6 @@ legend {
   font-size: 0.8rem;
   font-weight: 800;
   white-space: nowrap;
-}
-.resource-memory-input {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.resource-memory-input input {
-  width: 7rem;
 }
 .resource-settings .field-help {
   margin: 0.25rem 0 0;

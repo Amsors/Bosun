@@ -34,50 +34,50 @@ func TestSampleWindowDeduplicatesAndResetsIdentity(t *testing.T) {
 }
 
 func TestRecommendationWarmsUpAndIgnoresSingleSpike(t *testing.T) {
-	policy, _ := ForTier(bosunv1alpha1.SessionTierSmall)
-	samples := cpuSamples(450, 100, 100)
-	class, target := Recommendation(samples, 450, policy)
+	policy := Policy()
+	samples := cpuSamples(500, 100, 100)
+	class, target := Recommendation(samples, 500, policy)
 	if class != bosunv1alpha1.ResourceLoadClassWarmingUp || target != 0 {
 		t.Fatalf("recommendation = %s, %dm", class, target)
 	}
 
-	samples = cpuSamples(450, 400, 100, 100)
-	class, target = Recommendation(samples, 450, policy)
+	samples = cpuSamples(500, 400, 100, 100)
+	class, target = Recommendation(samples, 500, policy)
 	if class != bosunv1alpha1.ResourceLoadClassStable || target != 0 {
 		t.Fatalf("single spike recommendation = %s, %dm", class, target)
 	}
 }
 
 func TestRecommendationScalesUpAfterTwoOfThreeHighSamples(t *testing.T) {
-	policy, _ := ForTier(bosunv1alpha1.SessionTierSmall)
-	class, target := Recommendation(cpuSamples(450, 340, 100, 400), 450, policy)
-	if class != bosunv1alpha1.ResourceLoadClassCPUHigh || target != 700 {
-		t.Fatalf("recommendation = %s, %dm, want CPUHigh 700m", class, target)
+	policy := Policy()
+	class, target := Recommendation(cpuSamples(500, 400, 100, 400), 500, policy)
+	if class != bosunv1alpha1.ResourceLoadClassCPUHigh || target != 750 {
+		t.Fatalf("recommendation = %s, %dm, want CPUHigh 750m", class, target)
 	}
 }
 
 func TestRecommendationRequiresThreeLowSamples(t *testing.T) {
-	policy, _ := ForTier(bosunv1alpha1.SessionTierMedium)
-	class, target := Recommendation(cpuSamples(950, 100, 100), 950, policy)
+	policy := Policy()
+	class, target := Recommendation(cpuSamples(1000, 100, 100), 1000, policy)
 	if class != bosunv1alpha1.ResourceLoadClassWarmingUp || target != 0 {
 		t.Fatalf("two low samples = %s, %dm", class, target)
 	}
-	class, target = Recommendation(cpuSamples(950, 100, 100, 100), 950, policy)
+	class, target = Recommendation(cpuSamples(1000, 100, 100, 100), 1000, policy)
 	if class != bosunv1alpha1.ResourceLoadClassCPULow || target != 500 {
 		t.Fatalf("three low samples = %s, %dm, want CPULow 500m", class, target)
 	}
 }
 
-func TestScaleTargetsRespectTierBoundsAndStep(t *testing.T) {
-	small, _ := ForTier(bosunv1alpha1.SessionTierSmall)
-	if got := ScaleUpTarget(1450, small); got != 1500 {
+func TestScaleTargetsRespectSharedBoundsAndStep(t *testing.T) {
+	policy := Policy()
+	if got := ScaleUpTarget(2500, policy); got != 3000 {
 		t.Fatalf("ScaleUpTarget() = %dm", got)
 	}
-	if got := ScaleDownTarget(300, small); got != 250 {
+	if got := ScaleDownTarget(700, policy); got != 500 {
 		t.Fatalf("ScaleDownTarget() = %dm", got)
 	}
-	if got := ScaleDownTarget(450, small); got != 250 {
-		t.Fatalf("ScaleDownTarget() = %dm, want tier minimum 250m", got)
+	if got := ScaleDownTarget(500, policy); got != 500 {
+		t.Fatalf("ScaleDownTarget() = %dm, want minimum 500m", got)
 	}
 }
 

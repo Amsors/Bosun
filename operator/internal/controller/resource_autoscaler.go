@@ -158,10 +158,7 @@ func (r *ResourceAutoscaler) reconcileSession(
 			ctx, client.ObjectKeyFromObject(session), "agent container is unavailable",
 		)
 	}
-	policy, err := resourcepolicy.ForTier(session.Spec.Tier)
-	if err != nil {
-		return r.recordScalingError(ctx, client.ObjectKeyFromObject(session), err.Error())
-	}
+	policy := resourcepolicy.Policy()
 	if scaling.Mode == bosunv1alpha1.ResourceScalingModeAuto {
 		window := r.window(session.UID)
 		if window.Prepare(pod.UID, session.Generation) {
@@ -180,9 +177,7 @@ func (r *ResourceAutoscaler) reconcileSession(
 				ctx, client.ObjectKeyFromObject(session), "Manual mode has no manualLimits",
 			)
 		}
-		if err := resourcepolicy.ValidateManualLimits(
-			session.Spec.Tier, *scaling.ManualLimits,
-		); err != nil {
+		if err := resourcepolicy.ValidateManualLimits(*scaling.ManualLimits); err != nil {
 			return r.recordScalingError(ctx, client.ObjectKeyFromObject(session), err.Error())
 		}
 		desired[corev1.ResourceCPU] = *resource.NewMilliQuantity(
@@ -230,7 +225,7 @@ func (r *ResourceAutoscaler) reconcileAutoCPU(
 	ctx context.Context,
 	session *bosunv1alpha1.AgentSession,
 	pod *corev1.Pod,
-	policy resourcepolicy.TierPolicy,
+	policy resourcepolicy.ResourcePolicy,
 ) error {
 	key := client.ObjectKeyFromObject(session)
 	window := r.window(session.UID)
@@ -382,6 +377,7 @@ func (r *ResourceAutoscaler) applyResize(
 		return fmt.Errorf("%s: %w", client.ObjectKeyFromObject(pod), err)
 	}
 	r.clearFailedAttempt(session.UID)
+	r.clearWindow(session.UID)
 	now := metav1.NewTime(r.now())
 	return r.updateScalingStatus(
 		ctx,

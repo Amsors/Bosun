@@ -16,7 +16,6 @@ import (
 )
 
 type DesiredState string
-type SessionTier string
 type Runtime string
 type ProviderMode string
 type StoragePolicy string
@@ -29,9 +28,6 @@ type ResourceLoadClass string
 const (
 	DesiredStateRunning    DesiredState = "Running"
 	DesiredStateHibernated DesiredState = "Hibernated"
-
-	SessionTierSmall  SessionTier = "small"
-	SessionTierMedium SessionTier = "medium"
 
 	RuntimeClaudeCode Runtime = "claude-code"
 
@@ -113,10 +109,6 @@ type AgentSessionSpec struct {
 
 	// +kubebuilder:validation:Pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
 	ResumeNonce string `json:"resumeNonce"`
-
-	// +kubebuilder:validation:Enum=small;medium
-	// +kubebuilder:default=small
-	Tier SessionTier `json:"tier"`
 
 	// +kubebuilder:validation:Enum=claude-code
 	// +kubebuilder:default=claude-code
@@ -223,7 +215,6 @@ func (s *AgentSessionSpec) EffectiveResourceScaling() ResourceScalingSpec {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.status.nodeName`
 
 type AgentSession struct {

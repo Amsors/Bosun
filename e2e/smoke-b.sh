@@ -10,7 +10,7 @@ created="$(
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${BOSUN_E2E_ACCESS_TOKEN}" \
     -H "Idempotency-Key: $(uuidgen)" \
-    --data '{"tier":"small","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}'
+    --data '{"runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}'
 )"
 assert_code_zero <<<"${created}"
 session_id="$(jq -r '.data.id' <<<"${created}")"
