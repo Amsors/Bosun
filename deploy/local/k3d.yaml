@@ -29,3 +29,8 @@ options:
         nodeFilters:
           - server:*
           - agent:*
+      # AgentSession 只调度到 agent:0。启用 kubelet MemoryQoS，但不覆盖
+      # memory-throttling-factor，使用 Kubernetes 默认的 memory.high 公式。
+      - arg: --kubelet-arg=feature-gates=MemoryQoS=true
+        nodeFilters:
+          - agent:0
