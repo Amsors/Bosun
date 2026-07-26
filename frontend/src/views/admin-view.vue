@@ -155,6 +155,10 @@ function formatAppliedAt(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN')
 }
 
+function metricSourceLabel(source: string | undefined): string {
+  return source === 'kubelet-summary' ? '秒级' : 'metrics-server'
+}
+
 async function applyResize(pod: PodResourceSnapshot): Promise<void> {
   if (!pod.sessionID || !canResize(pod)) return
   const sessionID = pod.sessionID
@@ -376,6 +380,10 @@ onUnmounted(() => {
                       pod.limits.cpuMillicores ? formatCPU(pod.limits.cpuMillicores) : '未设置'
                     }}</span
                   >
+                  <span v-if="pod.metricsObservedAt">
+                    {{ metricSourceLabel(pod.metricsSource) }} ·
+                    {{ new Date(pod.metricsObservedAt).toLocaleTimeString('zh-CN') }}
+                  </span>
                 </td>
                 <td>
                   <strong>{{ pod.usage ? formatMemory(pod.usage.memoryBytes) : '—' }}</strong>

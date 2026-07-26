@@ -25,6 +25,7 @@ const samples = ref<Sample[]>([])
 const error = ref('')
 const loading = ref(true)
 const refreshIntervalMs = ref(loadResourceRefreshInterval())
+const lastRecordedMetricAt = ref('')
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 let requestActive = false
 let mounted = false
@@ -38,7 +39,9 @@ const agent = computed(() =>
 function record(next: SessionResourceSnapshot): void {
   snapshot.value = next
   error.value = ''
-  if (next.pod.usage) {
+  const metricObservedAt = next.pod.metricsObservedAt
+  if (next.pod.usage && metricObservedAt && metricObservedAt !== lastRecordedMetricAt.value) {
+    lastRecordedMetricAt.value = metricObservedAt
     samples.value = [
       ...samples.value,
       {
@@ -47,6 +50,10 @@ function record(next: SessionResourceSnapshot): void {
       },
     ].slice(-60)
   }
+}
+
+function metricSourceLabel(source: string | undefined): string {
+  return source === 'kubelet-summary' ? 'Kubelet 秒级采样' : 'metrics-server'
 }
 
 async function fetchSnapshot(): Promise<void> {
@@ -103,16 +110,21 @@ onUnmounted(() => {
       </div>
       <div class="resource-panel-meta">
         <span v-if="snapshot" class="sample-time">
-          更新于 {{ new Date(snapshot.observedAt).toLocaleTimeString('zh-CN') }}
+          查询于 {{ new Date(snapshot.observedAt).toLocaleTimeString('zh-CN') }}
+        </span>
+        <span v-if="snapshot?.pod.metricsObservedAt" class="sample-time">
+          指标采样于
+          {{ new Date(snapshot.pod.metricsObservedAt).toLocaleTimeString('zh-CN') }}
+          · {{ metricSourceLabel(snapshot.pod.metricsSource) }}
         </span>
         <ResourceRefreshControl v-model="refreshIntervalMs" />
       </div>
     </div>
-    <p v-if="loading && !snapshot">正在读取 metrics-server 数据…</p>
+    <p v-if="loading && !snapshot">正在读取资源数据…</p>
     <p v-else-if="error && !snapshot" class="alert" role="alert">{{ error }}</p>
     <template v-else-if="snapshot">
       <p v-if="!snapshot.metricsAvailable" class="metrics-note">
-        metrics-server 暂无该 Pod 的采样，requests 与 limits 仍可查看。
+        Kubelet 与 metrics-server 暂无该 Pod 的采样，requests 与 limits 仍可查看。
       </p>
       <p class="resource-limit-summary">
         Agent 容器 Limit：

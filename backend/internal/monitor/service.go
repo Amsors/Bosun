@@ -34,6 +34,7 @@ type Service struct {
 	sessions SessionStore
 	owners   OwnerStore
 	source   Source
+	live     liveMetricSampler
 	now      func() time.Time
 }
 
@@ -64,13 +65,19 @@ func (s *Service) Session(ctx context.Context, userID, sessionID uuid.UUID) (Ses
 		return SessionSnapshot{}, fmt.Errorf("get session Pod: %w", err)
 	}
 	metric, metricErr := s.source.GetPodMetric(ctx, pod.Namespace, pod.Name)
-	available := metricErr == nil
-	if metricErr != nil && !metricsUnavailable(metricErr) {
-		return SessionSnapshot{}, fmt.Errorf("get session Pod metrics: %w", metricErr)
+	metricPtr := podMetricPointer(metric, metricErr)
+	if pod.Spec.NodeName != "" {
+		if counters, liveErr := s.source.GetNodePodCounters(ctx, pod.Spec.NodeName); liveErr == nil {
+			if liveMetric, ready := s.live.podMetric(
+				pod.Namespace+"/"+pod.Name,
+				counters[pod.Namespace+"/"+pod.Name],
+			); ready {
+				metricPtr = &liveMetric
+			}
+		}
 	}
-	var metricPtr *PodMetric
-	if available {
-		metricPtr = &metric
+	if metricPtr == nil && metricErr != nil && !metricsUnavailable(metricErr) {
+		return SessionSnapshot{}, fmt.Errorf("get session Pod metrics: %w", metricErr)
 	}
 	cr, err := s.source.GetAgentSession(ctx, record.CRNamespace, record.CRName)
 	if apierrors.IsNotFound(err) {
@@ -81,7 +88,7 @@ func (s *Service) Session(ctx context.Context, userID, sessionID uuid.UUID) (Ses
 	}
 	return SessionSnapshot{
 		ObservedAt:       s.now(),
-		MetricsAvailable: available,
+		MetricsAvailable: metricPtr != nil,
 		Pod:              snapshotPod(pod, metricPtr, nil, map[string]*bosunv1alpha1.AgentSession{cr.Spec.SessionID: cr}),
 	}, nil
 }
@@ -118,10 +125,26 @@ func (s *Service) Cluster(ctx context.Context) (ClusterSnapshot, error) {
 	if nodeMetricsErr != nil && !metricsUnavailable(nodeMetricsErr) {
 		return ClusterSnapshot{}, fmt.Errorf("list Node metrics: %w", nodeMetricsErr)
 	}
+	if podMetrics == nil {
+		podMetrics = map[string]PodMetric{}
+	}
+	livePodMetricsAvailable := false
+	for i := range nodes {
+		counters, liveErr := s.source.GetNodePodCounters(ctx, nodes[i].Name)
+		if liveErr != nil {
+			continue
+		}
+		for podKey, counter := range counters {
+			if liveMetric, ready := s.live.podMetric(podKey, counter); ready {
+				podMetrics[podKey] = liveMetric
+				livePodMetricsAvailable = true
+			}
+		}
+	}
 
 	result := ClusterSnapshot{
 		ObservedAt:           s.now(),
-		PodMetricsAvailable:  podMetricsErr == nil,
+		PodMetricsAvailable:  podMetricsErr == nil || livePodMetricsAvailable,
 		NodeMetricsAvailable: nodeMetricsErr == nil,
 		Nodes:                make([]NodeSnapshot, 0, len(nodes)),
 		Pods:                 make([]PodSnapshot, 0, len(pods)),
@@ -150,6 +173,13 @@ func (s *Service) Cluster(ctx context.Context) (ClusterSnapshot, error) {
 		return result.Pods[i].Namespace < result.Pods[j].Namespace
 	})
 	return result, nil
+}
+
+func podMetricPointer(metric PodMetric, err error) *PodMetric {
+	if err != nil {
+		return nil
+	}
+	return &metric
 }
 
 func (s *Service) ResizeAgent(
@@ -259,6 +289,14 @@ func snapshotPod(
 		result.Phase = "Terminating"
 	}
 	result.Resize = podResizeSnapshot(pod)
+	if metric != nil {
+		if !metric.ObservedAt.IsZero() {
+			observedAt := metric.ObservedAt
+			result.MetricsObservedAt = &observedAt
+		}
+		result.MetricsWindowSeconds = metric.Window.Seconds()
+		result.MetricsSource = metric.Source
+	}
 	for _, status := range pod.Status.ContainerStatuses {
 		result.Restarts += status.RestartCount
 	}

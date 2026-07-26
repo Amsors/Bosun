@@ -153,6 +153,9 @@ export interface PodResourceSnapshot {
   ready: boolean
   restarts: number
   createdAt: RFC3339Timestamp
+  metricsObservedAt?: RFC3339Timestamp
+  metricsWindowSeconds?: number
+  metricsSource?: 'kubelet-summary' | 'metrics-server'
   usage: ResourceValues | null
   requests: ResourceValues
   limits: ResourceValues

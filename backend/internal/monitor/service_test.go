@@ -33,10 +33,15 @@ func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
 		}},
 		pods: []corev1.Pod{agentPod()},
 		podMetrics: map[string]PodMetric{
-			"bosun-u-1/agent-session-1": {Containers: map[string]Resources{
-				"agent":      {CPUMillicores: 125, MemoryBytes: 256 * 1024 * 1024},
-				"auth-proxy": {CPUMillicores: 5, MemoryBytes: 12 * 1024 * 1024},
-			}},
+			"bosun-u-1/agent-session-1": {
+				ObservedAt: now.Add(-15 * time.Second),
+				Window:     15 * time.Second,
+				Source:     "metrics-server",
+				Containers: map[string]Resources{
+					"agent":      {CPUMillicores: 125, MemoryBytes: 256 * 1024 * 1024},
+					"auth-proxy": {CPUMillicores: 5, MemoryBytes: 12 * 1024 * 1024},
+				},
+			},
 		},
 		nodeMetrics: map[string]Resources{
 			"worker-1": {CPUMillicores: 500, MemoryBytes: 2 * 1024 * 1024 * 1024},
@@ -75,6 +80,10 @@ func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
 		pod.Usage.MemoryBytes != 268*1024*1024 {
 		t.Fatalf("pod usage = %#v", pod.Usage)
 	}
+	if pod.MetricsObservedAt == nil || !pod.MetricsObservedAt.Equal(now.Add(-15*time.Second)) ||
+		pod.MetricsWindowSeconds != 15 || pod.MetricsSource != "metrics-server" {
+		t.Fatalf("pod metric metadata = %#v", pod)
+	}
 	if pod.Limits.CPUMillicores != 500 || pod.Limits.MemoryBytes != 1024*1024*1024 {
 		t.Fatalf("pod limits = %#v", pod.Limits)
 	}
@@ -82,6 +91,68 @@ func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
 		pod.ResourceScaling.ActualResources == nil ||
 		pod.ResourceScaling.ActualResources.CPUMillicores != 440 {
 		t.Fatalf("agent actual resources = %#v", pod.ResourceScaling)
+	}
+}
+
+func TestClusterPrefersLiveKubeletMetricsAfterCPUCounterWarmup(t *testing.T) {
+	start := time.Date(2026, 7, 24, 2, 0, 0, 0, time.UTC)
+	source := &fakeSource{
+		nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "worker-1"}}},
+		pods:  []corev1.Pod{agentPod()},
+		podMetrics: map[string]PodMetric{
+			"bosun-u-1/agent-session-1": {
+				ObservedAt: start.Add(-15 * time.Second),
+				Source:     "metrics-server",
+				Containers: map[string]Resources{
+					"agent":      {CPUMillicores: 100, MemoryBytes: 200},
+					"auth-proxy": {CPUMillicores: 5, MemoryBytes: 20},
+				},
+			},
+		},
+		nodeMetrics:   map[string]Resources{},
+		agentSessions: []bosunv1alpha1.AgentSession{agentSession("session-1")},
+		nodePodCounters: map[string]PodCounterMetric{
+			"bosun-u-1/agent-session-1": {
+				ObservedAt: start,
+				Containers: map[string]ContainerCounter{
+					"agent":      {CPUUsageSeconds: 10, MemoryWorkingSetBytes: 300},
+					"auth-proxy": {CPUUsageSeconds: 1, MemoryWorkingSetBytes: 30},
+				},
+			},
+		},
+	}
+	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	first, err := service.Cluster(context.Background())
+	if err != nil {
+		t.Fatalf("first Cluster() error = %v", err)
+	}
+	if first.Pods[0].MetricsSource != "metrics-server" {
+		t.Fatalf("first metrics source = %q", first.Pods[0].MetricsSource)
+	}
+
+	source.nodePodCounters = map[string]PodCounterMetric{
+		"bosun-u-1/agent-session-1": {
+			ObservedAt: start.Add(time.Second),
+			Containers: map[string]ContainerCounter{
+				"agent":      {CPUUsageSeconds: 10.25, MemoryWorkingSetBytes: 320},
+				"auth-proxy": {CPUUsageSeconds: 1.01, MemoryWorkingSetBytes: 31},
+			},
+		},
+	}
+	second, err := service.Cluster(context.Background())
+	if err != nil {
+		t.Fatalf("second Cluster() error = %v", err)
+	}
+	pod := second.Pods[0]
+	if pod.MetricsSource != "kubelet-summary" || pod.MetricsObservedAt == nil ||
+		!pod.MetricsObservedAt.Equal(start.Add(time.Second)) {
+		t.Fatalf("second metric metadata = %#v", pod)
+	}
+	if pod.Usage == nil || pod.Usage.CPUMillicores != 260 || pod.Usage.MemoryBytes != 351 {
+		t.Fatalf("second usage = %#v", pod.Usage)
 	}
 }
 
@@ -232,17 +303,19 @@ func (f fakeOwners) ListAgentOwners(context.Context) (map[string]AgentOwner, err
 }
 
 type fakeSource struct {
-	pod            corev1.Pod
-	pods           []corev1.Pod
-	nodes          []corev1.Node
-	podMetric      PodMetric
-	podMetricErr   error
-	podMetrics     map[string]PodMetric
-	podMetricsErr  error
-	nodeMetrics    map[string]Resources
-	nodeMetricErr  error
-	agentSessions  []bosunv1alpha1.AgentSession
-	updatedScaling *bosunv1alpha1.ResourceScalingSpec
+	pod               corev1.Pod
+	pods              []corev1.Pod
+	nodes             []corev1.Node
+	podMetric         PodMetric
+	podMetricErr      error
+	podMetrics        map[string]PodMetric
+	podMetricsErr     error
+	nodeMetrics       map[string]Resources
+	nodeMetricErr     error
+	nodePodCounters   map[string]PodCounterMetric
+	nodePodCounterErr error
+	agentSessions     []bosunv1alpha1.AgentSession
+	updatedScaling    *bosunv1alpha1.ResourceScalingSpec
 }
 
 func (f *fakeSource) GetPod(context.Context, string, string) (*corev1.Pod, error) {
@@ -267,6 +340,13 @@ func (f *fakeSource) ListPodMetrics(context.Context) (map[string]PodMetric, erro
 
 func (f *fakeSource) ListNodeMetrics(context.Context) (map[string]Resources, error) {
 	return f.nodeMetrics, f.nodeMetricErr
+}
+
+func (f *fakeSource) GetNodePodCounters(
+	context.Context,
+	string,
+) (map[string]PodCounterMetric, error) {
+	return f.nodePodCounters, f.nodePodCounterErr
 }
 
 func (f *fakeSource) GetAgentSession(

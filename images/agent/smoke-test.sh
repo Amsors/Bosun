@@ -7,7 +7,7 @@ docker build --tag "${image}" "$(dirname "$0")"
 
 container="$(
   docker run --detach --rm --read-only \
-    --tmpfs /workspace:rw,nosuid,uid=10001,gid=10001,mode=0750,size=64m \
+    --tmpfs /workspace:rw,exec,nosuid,uid=10001,gid=10001,mode=0750,size=64m \
     --tmpfs /tmp:rw,noexec,nosuid,mode=1777,size=64m \
     --tmpfs /run/bosun-tmux:rw,noexec,nosuid,uid=10001,gid=10001,mode=0750,size=16m \
     --env BOSUN_SESSION_ID="${session_id}" \

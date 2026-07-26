@@ -18,23 +18,26 @@ type ContainerSnapshot struct {
 }
 
 type PodSnapshot struct {
-	Namespace       string                        `json:"namespace"`
-	Name            string                        `json:"name"`
-	Phase           string                        `json:"phase"`
-	Resize          *PodResizeSnapshot            `json:"resize"`
-	NodeName        string                        `json:"nodeName"`
-	Ready           bool                          `json:"ready"`
-	Restarts        int32                         `json:"restarts"`
-	CreatedAt       time.Time                     `json:"createdAt"`
-	Usage           *Resources                    `json:"usage"`
-	Requests        Resources                     `json:"requests"`
-	Limits          Resources                     `json:"limits"`
-	Containers      []ContainerSnapshot           `json:"containers"`
-	IsAgent         bool                          `json:"isAgent"`
-	SessionID       string                        `json:"sessionID,omitempty"`
-	SessionName     string                        `json:"sessionName,omitempty"`
-	Username        string                        `json:"username,omitempty"`
-	ResourceScaling *AgentResourceScalingSnapshot `json:"resourceScaling,omitempty"`
+	Namespace            string                        `json:"namespace"`
+	Name                 string                        `json:"name"`
+	Phase                string                        `json:"phase"`
+	Resize               *PodResizeSnapshot            `json:"resize"`
+	NodeName             string                        `json:"nodeName"`
+	Ready                bool                          `json:"ready"`
+	Restarts             int32                         `json:"restarts"`
+	CreatedAt            time.Time                     `json:"createdAt"`
+	MetricsObservedAt    *time.Time                    `json:"metricsObservedAt,omitempty"`
+	MetricsWindowSeconds float64                       `json:"metricsWindowSeconds,omitempty"`
+	MetricsSource        string                        `json:"metricsSource,omitempty"`
+	Usage                *Resources                    `json:"usage"`
+	Requests             Resources                     `json:"requests"`
+	Limits               Resources                     `json:"limits"`
+	Containers           []ContainerSnapshot           `json:"containers"`
+	IsAgent              bool                          `json:"isAgent"`
+	SessionID            string                        `json:"sessionID,omitempty"`
+	SessionName          string                        `json:"sessionName,omitempty"`
+	Username             string                        `json:"username,omitempty"`
+	ResourceScaling      *AgentResourceScalingSnapshot `json:"resourceScaling,omitempty"`
 }
 
 type AgentResourceScalingSnapshot struct {

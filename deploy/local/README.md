@@ -31,6 +31,10 @@ make dev-up
 
 完成后执行 `make dev-forward`，再在浏览器访问 `http://localhost:18080`。
 
+本地 k3d 会将各节点 Kubelet 的 cAdvisor housekeeping 调整为 1 秒，用于资源监控课堂
+演示。该参数在创建节点时生效；修改 `deploy/local/k3d.yaml` 后需运行 `make dev-reset`
+重建集群，仅执行 `make dev-deploy` 不会更新 Kubelet 参数。
+
 
 ## 日常命令
 

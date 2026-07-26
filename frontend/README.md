@@ -38,3 +38,8 @@ actual resources 与 Kubernetes resize condition；手动提交会持久化为 M
 Auto 模式还会展示 CPU load class、CPU recommendation 和最近应用时间；手动提交会
 持久化为 Manual intent，也可恢复自动调度。轮询不会覆盖正在编辑的资源 draft。该页面
 及其资源调整接口按课程展示需求无需登录。
+
+1 秒刷新配合本地 Kubelet 1 秒 cAdvisor housekeeping，可通过 Kubelet Summary API
+显示相邻累计 CPU 计数器计算出的真实秒级负载；页面分别展示 API 查询时间与指标采样时间，
+并只在真实采样时间变化时追加图表点。实时源预热或不可用时自动显示 metrics-server
+回退数据。
