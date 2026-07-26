@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { formatResourceRefreshInterval } from '../utils/resource-refresh'
+
 const props = defineProps<{
   title: string
   current: number
@@ -8,6 +10,7 @@ const props = defineProps<{
   limit: number
   samples: number[]
   formatter: (value: number) => string
+  refreshIntervalMs: number
 }>()
 
 const ceiling = computed(
@@ -59,7 +62,8 @@ const requestY = computed(() => 38 - (Math.min(props.request, ceiling.value) / c
       <polyline v-if="points" class="chart-line" :points="points" />
     </svg>
     <footer>
-      <span>最近 {{ samples.length }} 个采样点</span><span>每 5 秒刷新</span>
+      <span>最近 {{ samples.length }} 个采样点</span>
+      <span>每 {{ formatResourceRefreshInterval(refreshIntervalMs) }}刷新</span>
     </footer>
   </article>
 </template>

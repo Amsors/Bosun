@@ -23,9 +23,14 @@ API 通过 Kubernetes `metrics.k8s.io/v1beta1` 实时读取 Node 与 Pod 的 CPU
 
 - `GET /api/v1/sessions/:id/resources`：需要登录，只允许读取当前用户的会话；
 - `GET /api/v1/admin/cluster`：课程展示用公开接口，返回全局 Node、Pod 与 Agent 所属用户。
-- `PUT /api/v1/admin/sessions/:id/resources`：课程展示用公开接口，通过 Kubernetes
-  `pods/resize` subresource 原地调整 `agent` 容器的 CPU / memory limit。请求体为
-  `{"cpuMillicores":700,"memoryBytes":1073741824}`，limit 不得低于该容器的 request。
+- `PUT /api/v1/admin/sessions/:id/resources`：课程展示用公开接口，将
+  `AgentSession.spec.resourceScaling` 持久化为 Manual intent。请求体为
+  `{"cpuMillicores":700,"memoryBytes":1073741824}`，CPU / memory 必须位于对应 tier
+  的 hard bounds。
+- `DELETE /api/v1/admin/sessions/:id/resources`：将会话恢复为 Auto 模式并清空 Manual
+  intent。
 
 接口不保存资源采样。集群未提供 metrics-server 时仍返回 Node、Pod 和资源规格，并通过 availability 字段标记实时指标暂不可用。
-资源调整不会修改平台 `auth-proxy` sidecar；返回的 Pod 总 limit 仍包含这些固定平台开销。
+资源 API 返回 Pod desired、container actual、Pod resize condition 和 Auto/Manual
+状态。backend 不直接调用 `pods/resize`；Operator 是唯一资源写入者，且不会修改平台
+`auth-proxy` sidecar。

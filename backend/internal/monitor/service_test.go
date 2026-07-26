@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/Amsors/Bosun/backend/internal/session"
+	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
 )
 
 func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
@@ -40,6 +41,7 @@ func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
 		nodeMetrics: map[string]Resources{
 			"worker-1": {CPUMillicores: 500, MemoryBytes: 2 * 1024 * 1024 * 1024},
 		},
+		agentSessions: []bosunv1alpha1.AgentSession{agentSession("session-1")},
 	}
 	service, err := NewService(
 		fakeSessionStore{},
@@ -76,6 +78,11 @@ func TestClusterAggregatesPodResourcesMetricsAndAgentOwner(t *testing.T) {
 	if pod.Limits.CPUMillicores != 500 || pod.Limits.MemoryBytes != 1024*1024*1024 {
 		t.Fatalf("pod limits = %#v", pod.Limits)
 	}
+	if pod.ResourceScaling == nil || !pod.ResourceScaling.ActualResourcesAvailable ||
+		pod.ResourceScaling.ActualResources == nil ||
+		pod.ResourceScaling.ActualResources.CPUMillicores != 440 {
+		t.Fatalf("agent actual resources = %#v", pod.ResourceScaling)
+	}
 }
 
 func TestSessionAllowsResourceSpecWhenMetricsAreUnavailable(t *testing.T) {
@@ -85,6 +92,9 @@ func TestSessionAllowsResourceSpecWhenMetricsAreUnavailable(t *testing.T) {
 	pod.Name = "agent-" + sessionID.String()
 	source := &fakeSource{
 		pod: pod,
+		agentSessions: []bosunv1alpha1.AgentSession{
+			agentSession(sessionID.String()),
+		},
 		podMetricErr: apierrors.NewNotFound(
 			schema.GroupResource{Group: "metrics.k8s.io", Resource: "pods"},
 			pod.Name,
@@ -112,13 +122,15 @@ func TestSessionAllowsResourceSpecWhenMetricsAreUnavailable(t *testing.T) {
 	}
 }
 
-func TestResizeAgentUsesPodResizeAndReturnsUpdatedLimits(t *testing.T) {
+func TestResizeAgentPersistsManualIntentWithoutCallingPodResize(t *testing.T) {
 	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
 	pod := agentPod()
+	pod.Name = "agent-" + sessionID.String()
 	pod.Labels["bosun.io/session"] = sessionID.String()
 	source := &fakeSource{
-		pods:         []corev1.Pod{pod},
-		podMetricErr: errors.New("metrics decode failed after successful resize"),
+		pod:           pod,
+		pods:          []corev1.Pod{pod},
+		agentSessions: []bosunv1alpha1.AgentSession{agentSession(sessionID.String())},
 	}
 	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
 	if err != nil {
@@ -132,29 +144,29 @@ func TestResizeAgentUsesPodResizeAndReturnsUpdatedLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResizeAgent() error = %v", err)
 	}
-	if source.resizeContainer != agentContainerName {
-		t.Fatalf("resize container = %q", source.resizeContainer)
+	if source.updatedScaling == nil ||
+		source.updatedScaling.Mode != bosunv1alpha1.ResourceScalingModeManual ||
+		source.updatedScaling.ManualLimits == nil {
+		t.Fatalf("updated scaling = %#v", source.updatedScaling)
 	}
-	agent := findContainer(&source.resizedPod, agentContainerName)
-	if agent == nil ||
-		agent.Resources.Limits.Cpu().MilliValue() != 700 ||
-		agent.Resources.Limits.Memory().Value() != 1536*1024*1024 {
-		t.Fatalf("resized agent = %#v", agent)
+	if source.updatedScaling.ManualLimits.CPUMillicores != 700 ||
+		source.updatedScaling.ManualLimits.MemoryBytes != 1536*1024*1024 {
+		t.Fatalf("manual limits = %#v", source.updatedScaling.ManualLimits)
 	}
-	if result.Pod.Limits.CPUMillicores != 750 ||
-		result.Pod.Limits.MemoryBytes != 1600*1024*1024 {
-		t.Fatalf("aggregate limits = %#v", result.Pod.Limits)
-	}
-	if result.MetricsAvailable {
-		t.Fatal("resize response unexpectedly reported unavailable metrics as available")
+	if result.Mode != string(bosunv1alpha1.ResourceScalingModeManual) ||
+		result.DesiredResources.CPUMillicores != 450 {
+		t.Fatalf("response = %#v", result)
 	}
 }
 
-func TestResizeAgentRejectsLimitsBelowRequests(t *testing.T) {
+func TestResizeAgentRejectsLimitsOutsideTierBounds(t *testing.T) {
 	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
 	pod := agentPod()
 	pod.Labels["bosun.io/session"] = sessionID.String()
-	source := &fakeSource{pods: []corev1.Pod{pod}}
+	source := &fakeSource{
+		pods:          []corev1.Pod{pod},
+		agentSessions: []bosunv1alpha1.AgentSession{agentSession(sessionID.String())},
+	}
 	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -167,8 +179,40 @@ func TestResizeAgentRejectsLimitsBelowRequests(t *testing.T) {
 	if !errors.Is(err, ErrInvalidResize) {
 		t.Fatalf("ResizeAgent() error = %v, want ErrInvalidResize", err)
 	}
-	if source.resizeContainer != "" {
-		t.Fatal("ResizePod was called for an invalid request")
+	if source.updatedScaling != nil {
+		t.Fatal("resource scaling was updated for an invalid request")
+	}
+}
+
+func TestRestoreAutoClearsManualIntent(t *testing.T) {
+	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
+	pod := agentPod()
+	pod.Name = "agent-" + sessionID.String()
+	cr := agentSession(sessionID.String())
+	cr.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
+		Mode: bosunv1alpha1.ResourceScalingModeManual,
+		ManualLimits: &bosunv1alpha1.ResourceValues{
+			CPUMillicores: 700,
+			MemoryBytes:   1024 * 1024 * 1024,
+		},
+	}
+	source := &fakeSource{pod: pod, agentSessions: []bosunv1alpha1.AgentSession{cr}}
+	service, err := NewService(fakeSessionStore{}, fakeOwners{}, source)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	result, err := service.RestoreAuto(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("RestoreAuto() error = %v", err)
+	}
+	if source.updatedScaling == nil ||
+		source.updatedScaling.Mode != bosunv1alpha1.ResourceScalingModeAuto ||
+		source.updatedScaling.ManualLimits != nil {
+		t.Fatalf("updated scaling = %#v", source.updatedScaling)
+	}
+	if result.Mode != string(bosunv1alpha1.ResourceScalingModeAuto) || result.ManualLimits != nil {
+		t.Fatalf("response = %#v", result)
 	}
 }
 
@@ -188,17 +232,17 @@ func (f fakeOwners) ListAgentOwners(context.Context) (map[string]AgentOwner, err
 }
 
 type fakeSource struct {
-	pod             corev1.Pod
-	pods            []corev1.Pod
-	nodes           []corev1.Node
-	podMetric       PodMetric
-	podMetricErr    error
-	podMetrics      map[string]PodMetric
-	podMetricsErr   error
-	nodeMetrics     map[string]Resources
-	nodeMetricErr   error
-	resizeContainer string
-	resizedPod      corev1.Pod
+	pod            corev1.Pod
+	pods           []corev1.Pod
+	nodes          []corev1.Node
+	podMetric      PodMetric
+	podMetricErr   error
+	podMetrics     map[string]PodMetric
+	podMetricsErr  error
+	nodeMetrics    map[string]Resources
+	nodeMetricErr  error
+	agentSessions  []bosunv1alpha1.AgentSession
+	updatedScaling *bosunv1alpha1.ResourceScalingSpec
 }
 
 func (f *fakeSource) GetPod(context.Context, string, string) (*corev1.Pod, error) {
@@ -207,27 +251,6 @@ func (f *fakeSource) GetPod(context.Context, string, string) (*corev1.Pod, error
 
 func (f *fakeSource) ListPods(context.Context) ([]corev1.Pod, error) {
 	return f.pods, nil
-}
-
-func (f *fakeSource) ResizePod(
-	_ context.Context,
-	namespace, name, containerName string,
-	limits Resources,
-) (*corev1.Pod, error) {
-	f.resizeContainer = containerName
-	for i := range f.pods {
-		if f.pods[i].Namespace != namespace || f.pods[i].Name != name {
-			continue
-		}
-		f.resizedPod = *f.pods[i].DeepCopy()
-		container := findContainer(&f.resizedPod, containerName)
-		container.Resources.Limits[corev1.ResourceCPU] =
-			*resource.NewMilliQuantity(limits.CPUMillicores, resource.DecimalSI)
-		container.Resources.Limits[corev1.ResourceMemory] =
-			*resource.NewQuantity(limits.MemoryBytes, resource.BinarySI)
-		return f.resizedPod.DeepCopy(), nil
-	}
-	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, name)
 }
 
 func (f *fakeSource) ListNodes(context.Context) ([]corev1.Node, error) {
@@ -244,6 +267,40 @@ func (f *fakeSource) ListPodMetrics(context.Context) (map[string]PodMetric, erro
 
 func (f *fakeSource) ListNodeMetrics(context.Context) (map[string]Resources, error) {
 	return f.nodeMetrics, f.nodeMetricErr
+}
+
+func (f *fakeSource) GetAgentSession(
+	_ context.Context,
+	_, _ string,
+) (*bosunv1alpha1.AgentSession, error) {
+	if len(f.agentSessions) == 0 {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: "bosun.io", Resource: "agentsessions"}, "")
+	}
+	return f.agentSessions[0].DeepCopy(), nil
+}
+
+func (f *fakeSource) ListAgentSessions(context.Context) ([]bosunv1alpha1.AgentSession, error) {
+	return f.agentSessions, nil
+}
+
+func (f *fakeSource) UpdateResourceScaling(
+	_ context.Context,
+	_, _ string,
+	expectedSessionID string,
+	scaling *bosunv1alpha1.ResourceScalingSpec,
+) (*bosunv1alpha1.AgentSession, error) {
+	for i := range f.agentSessions {
+		if f.agentSessions[i].Spec.SessionID != expectedSessionID {
+			continue
+		}
+		f.updatedScaling = scaling.DeepCopy()
+		f.agentSessions[i].Spec.ResourceScaling = scaling.DeepCopy()
+		return f.agentSessions[i].DeepCopy(), nil
+	}
+	return nil, apierrors.NewNotFound(
+		schema.GroupResource{Group: "bosun.io", Resource: "agentsessions"},
+		expectedSessionID,
+	)
 }
 
 func agentPod() corev1.Pod {
@@ -280,6 +337,16 @@ func agentPod() corev1.Pod {
 			Conditions: []corev1.PodCondition{{
 				Type: corev1.PodReady, Status: corev1.ConditionTrue,
 			}},
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:      "agent",
+					Resources: &corev1.ResourceRequirements{Limits: resources("440m", "950Mi")},
+				},
+				{
+					Name:      "auth-proxy",
+					Resources: &corev1.ResourceRequirements{Limits: resources("50m", "64Mi")},
+				},
+			},
 		},
 	}
 }
@@ -288,5 +355,21 @@ func resources(cpu, memory string) corev1.ResourceList {
 	return corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse(cpu),
 		corev1.ResourceMemory: resource.MustParse(memory),
+	}
+}
+
+func agentSession(sessionID string) bosunv1alpha1.AgentSession {
+	return bosunv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "bosun-u-1",
+			Name:      "agent-" + sessionID,
+		},
+		Spec: bosunv1alpha1.AgentSessionSpec{
+			SessionID: sessionID,
+			Tier:      bosunv1alpha1.SessionTierSmall,
+			ResourceScaling: &bosunv1alpha1.ResourceScalingSpec{
+				Mode: bosunv1alpha1.ResourceScalingModeAuto,
+			},
+		},
 	}
 }

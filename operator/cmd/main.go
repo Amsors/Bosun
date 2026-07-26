@@ -29,6 +29,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -68,6 +70,10 @@ func main() {
 	var gatewayURL string
 	var egressProxyURL string
 	var idleScanInterval time.Duration
+	var resourceAutoscalingEnabled bool
+	var resourceSampleInterval time.Duration
+	var resourceScaleUpCooldown time.Duration
+	var resourceScaleDownCooldown time.Duration
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
@@ -101,6 +107,30 @@ func main() {
 		"Cluster URL for the Git egress proxy.",
 	)
 	flag.DurationVar(&idleScanInterval, "idle-scan-interval", 30*time.Second, "Agent idle activity scan interval.")
+	flag.BoolVar(
+		&resourceAutoscalingEnabled,
+		"resource-autoscaling-enabled",
+		true,
+		"Enable Agent resource intent reconciliation and automatic CPU limit scaling.",
+	)
+	flag.DurationVar(
+		&resourceSampleInterval,
+		"resource-sample-interval",
+		15*time.Second,
+		"Agent resource metrics sample interval.",
+	)
+	flag.DurationVar(
+		&resourceScaleUpCooldown,
+		"resource-scale-up-cooldown",
+		time.Minute,
+		"Minimum interval between automatic CPU limit increases.",
+	)
+	flag.DurationVar(
+		&resourceScaleDownCooldown,
+		"resource-scale-down-cooldown",
+		5*time.Minute,
+		"Minimum interval between automatic CPU limit decreases.",
+	)
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -124,6 +154,10 @@ func main() {
 		agentImagePullPolicy != string(corev1.PullIfNotPresent) &&
 		agentImagePullPolicy != string(corev1.PullNever) {
 		setupLog.Error(nil, "Invalid agent image pull policy", "value", agentImagePullPolicy)
+		os.Exit(2)
+	}
+	if resourceSampleInterval <= 0 || resourceScaleUpCooldown < 0 || resourceScaleDownCooldown < 0 {
+		setupLog.Error(nil, "Invalid resource autoscaling duration")
 		os.Exit(2)
 	}
 
@@ -247,6 +281,35 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentsession")
 		os.Exit(1)
+	}
+	if resourceAutoscalingEnabled {
+		coreClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "Failed to create resource autoscaling client")
+			os.Exit(1)
+		}
+		dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "Failed to create resource metrics client")
+			os.Exit(1)
+		}
+		if err := mgr.Add(&controller.ResourceAutoscaler{
+			Client:            mgr.GetClient(),
+			Resizer:           controller.NewPodResizer(coreClient),
+			Metrics:           controller.NewPodMetricsReader(dynamicClient),
+			SampleInterval:    resourceSampleInterval,
+			ScaleUpCooldown:   resourceScaleUpCooldown,
+			ScaleDownCooldown: resourceScaleDownCooldown,
+		}); err != nil {
+			setupLog.Error(err, "Failed to register resource autoscaler")
+			os.Exit(1)
+		}
+		setupLog.Info(
+			"Registered resource autoscaler",
+			"sampleInterval", resourceSampleInterval,
+			"scaleUpCooldown", resourceScaleUpCooldown,
+			"scaleDownCooldown", resourceScaleDownCooldown,
+		)
 	}
 	// +kubebuilder:scaffold:builder
 

@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-build dev-deploy dev-forward dev-smoke dev-reset dev-down cluster-reset-data cluster-reset-data-test
+.PHONY: dev-up dev-build dev-deploy dev-forward dev-smoke dev-autoscaling dev-reset dev-down cluster-reset-data cluster-reset-data-test
 
 COMPONENT ?= all
 
@@ -16,6 +16,9 @@ dev-forward:
 
 dev-smoke:
 	./deploy/scripts/local-dev.sh smoke
+
+dev-autoscaling:
+	./deploy/scripts/local-dev.sh autoscaling
 
 dev-reset:
 	./deploy/scripts/local-dev.sh reset

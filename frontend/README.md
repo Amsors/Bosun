@@ -31,4 +31,10 @@ make dev-forward
 - `src/components/resource-usage-panel.vue`：会话 CPU、内存实时图表；最近 60 个采样点仅保存在页面内存；
 - `nginx.conf`：生产静态文件、API 和 WebSocket 反向代理配置。
 
-全局资源监控位于 `/admin`，每 5 秒刷新，可分别显示或隐藏 `kube-system`、`cert-manager`，也可只查看 Agent Pod。页面可通过 Kubernetes in-place Pod resize 动态增减 Agent 容器 CPU / memory limit；会话详情中的资源图表会在下一次轮询时同步显示新的 Pod 总 limit。该页面及其资源调整接口按课程展示需求无需登录。
+全局资源监控位于 `/admin`，资源刷新周期可选择 1、2、5、10、30 或 60 秒（默认 5 秒），
+设置会保存在浏览器中，并与会话详情资源图表共用。页面可分别显示或隐藏 `kube-system`、
+`cert-manager`，也可只查看 Agent Pod。页面展示 Agent 的 Auto/Manual 模式、desired /
+actual resources 与 Kubernetes resize condition；手动提交会持久化为 Manual intent，
+Auto 模式还会展示 CPU load class、CPU recommendation 和最近应用时间；手动提交会
+持久化为 Manual intent，也可恢复自动调度。轮询不会覆盖正在编辑的资源 draft。该页面
+及其资源调整接口按课程展示需求无需登录。

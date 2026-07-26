@@ -180,6 +180,9 @@ func agentSessionFromDomain(session Session) *bosunv1alpha1.AgentSession {
 			IdleTimeoutSeconds:    1800,
 			ActiveDeadlineSeconds: 28800,
 			PriorityClassName:     priorityClassName(session.Priority),
+			ResourceScaling: &bosunv1alpha1.ResourceScalingSpec{
+				Mode: bosunv1alpha1.ResourceScalingModeAuto,
+			},
 		},
 	}
 }

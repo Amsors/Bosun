@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import type {
   ClusterResourceSnapshot,
   ContainerResourceSnapshot,
   PodResourceSnapshot,
+  ResourceLoadClass,
 } from '../api/contracts'
 import { monitorApi } from '../api/monitor'
 import AppShell from '../components/app-shell.vue'
+import ResourceRefreshControl from '../components/resource-refresh-control.vue'
 import StatusPanel from '../components/status-panel.vue'
 import { formatCPU, formatMemory, percent } from '../utils/resources'
+import { loadResourceRefreshInterval, saveResourceRefreshInterval } from '../utils/resource-refresh'
 
 const snapshot = ref<ClusterResourceSnapshot | null>(null)
 const loading = ref(true)
@@ -22,8 +25,10 @@ const resizeDrafts = ref<Record<string, { cpuMillicores: number; memoryMiB: numb
 const resizeDirty = ref<Record<string, boolean>>({})
 const resizeBusy = ref<Record<string, boolean>>({})
 const resizeErrors = ref<Record<string, string>>({})
+const refreshIntervalMs = ref(loadResourceRefreshInterval())
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 let requestActive = false
+let mounted = false
 const mebibyte = 1024 * 1024
 
 const visiblePods = computed(() => {
@@ -61,7 +66,7 @@ function agentContainer(pod: PodResourceSnapshot): ContainerResourceSnapshot | u
 }
 
 function draftFromPod(pod: PodResourceSnapshot): { cpuMillicores: number; memoryMiB: number } {
-  const limits = agentContainer(pod)?.limits
+  const limits = pod.resourceScaling?.manualLimits || agentContainer(pod)?.limits
   return {
     cpuMillicores: limits?.cpuMillicores || 0,
     memoryMiB: Math.round((limits?.memoryBytes || 0) / mebibyte),
@@ -98,25 +103,56 @@ function finishResizeEdit(pod: PodResourceSnapshot): void {
 }
 
 function minimumCPU(pod: PodResourceSnapshot): number {
-  return agentContainer(pod)?.requests.cpuMillicores || 1
+  return pod.resourceScaling?.minCPUMillicores || agentContainer(pod)?.requests.cpuMillicores || 1
 }
 
 function minimumMemoryMiB(pod: PodResourceSnapshot): number {
-  return Math.ceil((agentContainer(pod)?.requests.memoryBytes || 1) / mebibyte)
+  return Math.ceil(
+    (pod.resourceScaling?.minMemoryBytes || agentContainer(pod)?.requests.memoryBytes || 1) /
+      mebibyte,
+  )
 }
 
 function canResize(pod: PodResourceSnapshot): boolean {
-  if (!pod.sessionID || pod.phase !== 'Running' || resizeBusy.value[pod.sessionID]) return false
+  if (!pod.sessionID || pod.phase === 'Terminating' || resizeBusy.value[pod.sessionID]) return false
   const draft = resizeDrafts.value[pod.sessionID]
   if (
     !draft ||
     !Number.isInteger(draft.cpuMillicores) ||
     !Number.isInteger(draft.memoryMiB) ||
     draft.cpuMillicores < minimumCPU(pod) ||
-    draft.memoryMiB < minimumMemoryMiB(pod)
+    draft.memoryMiB < minimumMemoryMiB(pod) ||
+    (pod.resourceScaling &&
+      (draft.cpuMillicores > pod.resourceScaling.maxCPUMillicores ||
+        draft.memoryMiB * mebibyte > pod.resourceScaling.maxMemoryBytes))
   )
     return false
-  return !sameDraft(draft, draftFromPod(pod))
+  return pod.resourceScaling?.mode === 'Auto' || !sameDraft(draft, draftFromPod(pod))
+}
+
+function manualIntentQueued(pod: PodResourceSnapshot): boolean {
+  const scaling = pod.resourceScaling
+  return (
+    scaling?.mode === 'Manual' &&
+    !!scaling.manualLimits &&
+    (scaling.manualLimits.cpuMillicores !== scaling.desiredResources.cpuMillicores ||
+      scaling.manualLimits.memoryBytes !== scaling.desiredResources.memoryBytes)
+  )
+}
+
+function loadClassLabel(loadClass: ResourceLoadClass): string {
+  const labels: Record<ResourceLoadClass, string> = {
+    Unknown: '指标未知',
+    WarmingUp: '预热中',
+    CPUHigh: 'CPU 高负载',
+    CPULow: 'CPU 低负载',
+    Stable: 'CPU 稳定',
+  }
+  return labels[loadClass]
+}
+
+function formatAppliedAt(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString('zh-CN')
 }
 
 async function applyResize(pod: PodResourceSnapshot): Promise<void> {
@@ -130,34 +166,67 @@ async function applyResize(pod: PodResourceSnapshot): Promise<void> {
       cpuMillicores: draft.cpuMillicores,
       memoryBytes: draft.memoryMiB * mebibyte,
     })
-    const updated = {
-      ...result.pod,
-      username: pod.username,
-      sessionName: pod.sessionName,
-    }
     if (snapshot.value) {
       snapshot.value = {
         ...snapshot.value,
         observedAt: result.observedAt,
-        pods: snapshot.value.pods.map((item) =>
-          item.namespace === pod.namespace && item.name === pod.name ? updated : item,
-        ),
+        pods: snapshot.value.pods.map((item) => {
+          if (item.namespace !== pod.namespace || item.name !== pod.name) return item
+          return { ...item, resourceScaling: result, resize: result.resize }
+        }),
       }
     }
     resizeDirty.value[sessionID] = false
-    syncResizeDrafts([updated])
   } catch {
-    resizeErrors.value[sessionID] = '调整失败，请检查输入值和集群的 in-place resize 状态。'
+    resizeErrors.value[sessionID] = '保存手动资源意图失败，请检查输入值是否位于当前规格范围内。'
   } finally {
     resizeBusy.value[sessionID] = false
   }
 }
 
+async function restoreAuto(pod: PodResourceSnapshot): Promise<void> {
+  if (!pod.sessionID || resizeBusy.value[pod.sessionID]) return
+  const sessionID = pod.sessionID
+  resizeBusy.value[sessionID] = true
+  resizeErrors.value[sessionID] = ''
+  try {
+    const result = await monitorApi.restoreAuto(sessionID)
+    if (snapshot.value) {
+      snapshot.value = {
+        ...snapshot.value,
+        observedAt: result.observedAt,
+        pods: snapshot.value.pods.map((item) =>
+          item.namespace === pod.namespace && item.name === pod.name
+            ? { ...item, resourceScaling: result, resize: result.resize }
+            : item,
+        ),
+      }
+    }
+    resizeDirty.value[sessionID] = false
+  } catch {
+    resizeErrors.value[sessionID] = '恢复自动调度失败，请稍后重试。'
+  } finally {
+    resizeBusy.value[sessionID] = false
+  }
+}
+
+function startPolling(): void {
+  if (poller) globalThis.clearInterval(poller)
+  poller = globalThis.setInterval(load, refreshIntervalMs.value)
+}
+
+watch(refreshIntervalMs, (intervalMs) => {
+  saveResourceRefreshInterval(intervalMs)
+  if (mounted) startPolling()
+})
+
 onMounted(async () => {
+  mounted = true
   await load()
-  poller = globalThis.setInterval(load, 5000)
+  if (mounted) startPolling()
 })
 onUnmounted(() => {
+  mounted = false
   if (poller) globalThis.clearInterval(poller)
 })
 </script>
@@ -171,7 +240,8 @@ onUnmounted(() => {
         <p>Node、Pod 与 Agent 会话的实时 Kubernetes 资源快照。</p>
       </div>
       <div v-if="snapshot" class="refresh-indicator">
-        <span class="live-dot" />每 5 秒刷新
+        <span class="live-dot" />
+        <ResourceRefreshControl v-model="refreshIntervalMs" />
         <small>{{ new Date(snapshot.observedAt).toLocaleTimeString('zh-CN') }}</small>
       </div>
     </div>
@@ -319,8 +389,14 @@ onUnmounted(() => {
                 <td>
                   <template v-if="pod.isAgent">
                     <span class="agent-badge">AGENT</span>
+                    <span class="agent-badge">
+                      {{ pod.resourceScaling?.mode === 'Manual' ? '手动固定' : '自动调度' }}
+                    </span>
                     <strong>{{ pod.username || '未知用户' }}</strong>
                     <span>{{ pod.sessionName || pod.sessionID }}</span>
+                    <span v-if="pod.resourceScaling?.loadClass">
+                      {{ loadClassLabel(pod.resourceScaling.loadClass) }}
+                    </span>
                   </template>
                   <span v-else>—</span>
                 </td>
@@ -337,7 +413,8 @@ onUnmounted(() => {
                         type="number"
                         step="1"
                         :min="minimumCPU(pod)"
-                        :disabled="resizeBusy[pod.sessionID] || pod.phase !== 'Running'"
+                        :max="pod.resourceScaling?.maxCPUMillicores"
+                        :disabled="resizeBusy[pod.sessionID] || pod.phase === 'Terminating'"
                         @focus="startResizeEdit(pod.sessionID)"
                         @input="startResizeEdit(pod.sessionID)"
                         @blur="finishResizeEdit(pod)"
@@ -350,17 +427,68 @@ onUnmounted(() => {
                         type="number"
                         step="1"
                         :min="minimumMemoryMiB(pod)"
-                        :disabled="resizeBusy[pod.sessionID] || pod.phase !== 'Running'"
+                        :max="
+                          pod.resourceScaling
+                            ? Math.floor(pod.resourceScaling.maxMemoryBytes / mebibyte)
+                            : undefined
+                        "
+                        :disabled="resizeBusy[pod.sessionID] || pod.phase === 'Terminating'"
                         @focus="startResizeEdit(pod.sessionID)"
                         @input="startResizeEdit(pod.sessionID)"
                         @blur="finishResizeEdit(pod)"
                       />
                     </label>
                     <button class="primary" type="submit" :disabled="!canResize(pod)">
-                      {{ resizeBusy[pod.sessionID] ? '调整中…' : '应用' }}
+                      {{ resizeBusy[pod.sessionID] ? '保存中…' : '手动固定' }}
                     </button>
+                    <button
+                      v-if="pod.resourceScaling?.mode === 'Manual'"
+                      type="button"
+                      :disabled="resizeBusy[pod.sessionID]"
+                      @click="restoreAuto(pod)"
+                    >
+                      恢复自动调度
+                    </button>
+                    <span v-if="pod.resourceScaling" class="resize-state">
+                      Desired:
+                      {{ formatCPU(pod.resourceScaling.desiredResources.cpuMillicores) }} /
+                      {{ formatMemory(pod.resourceScaling.desiredResources.memoryBytes) }}
+                    </span>
+                    <span
+                      v-if="
+                        pod.resourceScaling?.mode === 'Auto' &&
+                        pod.resourceScaling.recommendedCPUMillicores
+                      "
+                      class="resize-state"
+                    >
+                      CPU 推荐:
+                      {{ formatCPU(pod.resourceScaling.recommendedCPUMillicores) }}
+                    </span>
+                    <span v-if="pod.resourceScaling?.lastAppliedAt" class="resize-state">
+                      最近应用:
+                      {{ formatAppliedAt(pod.resourceScaling.lastAppliedAt) }}
+                    </span>
+                    <span v-if="pod.resourceScaling?.actualResources" class="resize-state">
+                      Actual:
+                      {{ formatCPU(pod.resourceScaling.actualResources.cpuMillicores) }} /
+                      {{ formatMemory(pod.resourceScaling.actualResources.memoryBytes) }}
+                    </span>
+                    <span
+                      v-else-if="
+                        pod.resourceScaling && !pod.resourceScaling.actualResourcesAvailable
+                      "
+                      class="resize-state"
+                    >
+                      Actual resources 暂不可用
+                    </span>
                     <span v-if="pod.resize" class="resize-state">
                       {{ pod.resize.reason || 'Kubernetes 正在应用新 Limit' }}
+                    </span>
+                    <span v-else-if="manualIntentQueued(pod)" class="resize-state">
+                      手动调整已排队
+                    </span>
+                    <span v-if="pod.resourceScaling?.lastError" class="resize-error" role="alert">
+                      {{ pod.resourceScaling.lastError }}
                     </span>
                     <span v-if="resizeErrors[pod.sessionID]" class="resize-error" role="alert">
                       {{ resizeErrors[pod.sessionID] }}

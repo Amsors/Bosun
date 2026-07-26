@@ -4,9 +4,11 @@ import (
 	"context"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	kubernetesfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
 )
 
 func TestPodMetricFromUnstructuredParsesKubernetesQuantities(t *testing.T) {
@@ -31,35 +33,34 @@ func TestPodMetricFromUnstructuredParsesKubernetesQuantities(t *testing.T) {
 	}
 }
 
-func TestKubernetesSourceUsesResizeSubresourceAndPreservesRequests(t *testing.T) {
-	pod := agentPod()
-	client := kubernetesfake.NewSimpleClientset(&pod)
-	source := &KubernetesSource{core: client}
+func TestKubernetesSourcePersistsResourceScalingIntent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	session := agentSession("session-1")
+	objects := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&session).Build()
+	source := &KubernetesSource{objects: objects}
 
-	updated, err := source.ResizePod(
+	updated, err := source.UpdateResourceScaling(
 		context.Background(),
-		pod.Namespace,
-		pod.Name,
-		agentContainerName,
-		Resources{CPUMillicores: 700, MemoryBytes: 1536 * 1024 * 1024},
+		session.Namespace,
+		session.Name,
+		session.Spec.SessionID,
+		&bosunv1alpha1.ResourceScalingSpec{
+			Mode: bosunv1alpha1.ResourceScalingModeManual,
+			ManualLimits: &bosunv1alpha1.ResourceValues{
+				CPUMillicores: 700,
+				MemoryBytes:   1536 * 1024 * 1024,
+			},
+		},
 	)
 	if err != nil {
-		t.Fatalf("ResizePod() error = %v", err)
+		t.Fatalf("UpdateResourceScaling() error = %v", err)
 	}
-	agent := findContainer(updated, agentContainerName)
-	if agent.Resources.Requests.Cpu().MilliValue() != 240 ||
-		agent.Resources.Limits.Cpu().MilliValue() != 700 {
-		t.Fatalf("agent resources = %#v", agent.Resources)
-	}
-	actions := client.Actions()
-	last := actions[len(actions)-1]
-	if last.GetVerb() != "update" || last.GetSubresource() != "resize" {
-		t.Fatalf("last Kubernetes action = %s %q", last.GetVerb(), last.GetSubresource())
-	}
-	if findContainer(updated, "auth-proxy").Resources.Limits.Cpu().MilliValue() != 50 {
-		t.Fatal("ResizePod changed the auth-proxy limits")
-	}
-	if _, ok := agent.Resources.Limits[corev1.ResourceMemory]; !ok {
-		t.Fatal("ResizePod omitted the memory limit")
+	if updated.Spec.ResourceScaling == nil ||
+		updated.Spec.ResourceScaling.Mode != bosunv1alpha1.ResourceScalingModeManual ||
+		updated.Spec.ResourceScaling.ManualLimits.CPUMillicores != 700 {
+		t.Fatalf("resourceScaling = %#v", updated.Spec.ResourceScaling)
 	}
 }

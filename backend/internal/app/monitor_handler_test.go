@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -41,12 +42,43 @@ func TestMonitorRoutesKeepClusterPublicAndSessionAuthenticated(t *testing.T) {
 		`{"cpuMillicores":700,"memoryBytes":1073741824}`,
 		nil,
 	)
-	if resize.Code != http.StatusOK {
+	if resize.Code != http.StatusAccepted {
 		t.Fatalf("public resize status=%d body=%s", resize.Code, resize.Body.String())
+	}
+	restore := doJSON(
+		t,
+		router,
+		http.MethodDelete,
+		"/api/v1/admin/sessions/"+sessionID.String()+"/resources",
+		"",
+		nil,
+	)
+	if restore.Code != http.StatusAccepted {
+		t.Fatalf("public restore status=%d body=%s", restore.Code, restore.Body.String())
 	}
 }
 
-type fakeMonitorService struct{}
+func TestManualResourceIntentOutsideTierBoundsReturnsUnprocessableEntity(t *testing.T) {
+	service := fakeMonitorService{resizeErr: fmt.Errorf("%w: outside tier bounds", monitor.ErrInvalidResize)}
+	router, _, _ := newSessionMonitorTestAPI(t, &fakeSessionService{}, service)
+	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
+
+	response := doJSON(
+		t,
+		router,
+		http.MethodPut,
+		"/api/v1/admin/sessions/"+sessionID.String()+"/resources",
+		`{"cpuMillicores":1,"memoryBytes":1}`,
+		nil,
+	)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type fakeMonitorService struct {
+	resizeErr error
+}
 
 func (fakeMonitorService) Session(
 	context.Context,
@@ -69,13 +101,24 @@ func (fakeMonitorService) Cluster(context.Context) (monitor.ClusterSnapshot, err
 	}, nil
 }
 
-func (fakeMonitorService) ResizeAgent(
+func (f fakeMonitorService) ResizeAgent(
 	context.Context,
 	uuid.UUID,
 	monitor.ResizeRequest,
-) (monitor.SessionSnapshot, error) {
-	return monitor.SessionSnapshot{
+) (monitor.ResourceScalingResponse, error) {
+	if f.resizeErr != nil {
+		return monitor.ResourceScalingResponse{}, f.resizeErr
+	}
+	return monitor.ResourceScalingResponse{
 		ObservedAt: time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
-		Pod:        monitor.PodSnapshot{},
+	}, nil
+}
+
+func (fakeMonitorService) RestoreAuto(
+	context.Context,
+	uuid.UUID,
+) (monitor.ResourceScalingResponse, error) {
+	return monitor.ResourceScalingResponse{
+		ObservedAt: time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
 	}, nil
 }

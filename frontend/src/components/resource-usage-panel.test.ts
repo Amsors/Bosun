@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { SessionResourceSnapshot } from '../api/contracts'
+import { resourceRefreshIntervalStorageKey } from '../utils/resource-refresh'
 import ResourceUsagePanel from './resource-usage-panel.vue'
 
 const getSessionResources = vi.hoisted(() => vi.fn())
@@ -41,12 +42,19 @@ function snapshot(agentCPU: number, agentMemoryMiB: number): SessionResourceSnap
             cpuMillicores: agentCPU,
             memoryBytes: agentMemoryMiB * mebibyte,
           },
+          actualLimits: {
+            cpuMillicores: agentCPU,
+            memoryBytes: agentMemoryMiB * mebibyte,
+          },
+          actualResourcesAvailable: true,
         },
         {
           name: 'auth-proxy',
           usage: { cpuMillicores: 5, memoryBytes: 12 * mebibyte },
           requests: { cpuMillicores: 10, memoryBytes: 16 * mebibyte },
           limits: { cpuMillicores: 50, memoryBytes: 64 * mebibyte },
+          actualLimits: { cpuMillicores: 50, memoryBytes: 64 * mebibyte },
+          actualResourcesAvailable: true,
         },
       ],
       isAgent: true,
@@ -59,6 +67,7 @@ describe('ResourceUsagePanel', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    globalThis.localStorage.clear()
   })
 
   it('updates the displayed agent and Pod limits on the next polling cycle', async () => {
@@ -82,6 +91,33 @@ describe('ResourceUsagePanel', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('700m')
     expect(wrapper.text()).toContain('1.50 GiB')
+    expect(getSessionResources).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+  })
+
+  it('uses the saved refresh interval and updates the chart description', async () => {
+    vi.useFakeTimers()
+    globalThis.localStorage.setItem(resourceRefreshIntervalStorageKey, '2000')
+    getSessionResources.mockResolvedValue(snapshot(450, 960))
+
+    const wrapper = mount(ResourceUsagePanel, {
+      props: {
+        sessionId: '018f9c6e-1234-7000-8000-abcdef012501',
+        getAccessToken: () => 'access-token',
+        refreshAccessToken: async () => 'access-token',
+      },
+    })
+    await flushPromises()
+
+    expect(
+      wrapper.get<HTMLSelectElement>('select[aria-label="资源数据刷新周期"]').element.value,
+    ).toBe('2000')
+    expect(wrapper.text()).toContain('每 2 秒刷新')
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(getSessionResources).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
     expect(getSessionResources).toHaveBeenCalledTimes(2)
 
     wrapper.unmount()

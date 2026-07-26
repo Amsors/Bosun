@@ -9,29 +9,49 @@ type Resources struct {
 }
 
 type ContainerSnapshot struct {
-	Name     string     `json:"name"`
-	Usage    *Resources `json:"usage"`
-	Requests Resources  `json:"requests"`
-	Limits   Resources  `json:"limits"`
+	Name                     string     `json:"name"`
+	Usage                    *Resources `json:"usage"`
+	Requests                 Resources  `json:"requests"`
+	Limits                   Resources  `json:"limits"`
+	ActualLimits             *Resources `json:"actualLimits"`
+	ActualResourcesAvailable bool       `json:"actualResourcesAvailable"`
 }
 
 type PodSnapshot struct {
-	Namespace   string              `json:"namespace"`
-	Name        string              `json:"name"`
-	Phase       string              `json:"phase"`
-	Resize      *PodResizeSnapshot  `json:"resize"`
-	NodeName    string              `json:"nodeName"`
-	Ready       bool                `json:"ready"`
-	Restarts    int32               `json:"restarts"`
-	CreatedAt   time.Time           `json:"createdAt"`
-	Usage       *Resources          `json:"usage"`
-	Requests    Resources           `json:"requests"`
-	Limits      Resources           `json:"limits"`
-	Containers  []ContainerSnapshot `json:"containers"`
-	IsAgent     bool                `json:"isAgent"`
-	SessionID   string              `json:"sessionID,omitempty"`
-	SessionName string              `json:"sessionName,omitempty"`
-	Username    string              `json:"username,omitempty"`
+	Namespace       string                        `json:"namespace"`
+	Name            string                        `json:"name"`
+	Phase           string                        `json:"phase"`
+	Resize          *PodResizeSnapshot            `json:"resize"`
+	NodeName        string                        `json:"nodeName"`
+	Ready           bool                          `json:"ready"`
+	Restarts        int32                         `json:"restarts"`
+	CreatedAt       time.Time                     `json:"createdAt"`
+	Usage           *Resources                    `json:"usage"`
+	Requests        Resources                     `json:"requests"`
+	Limits          Resources                     `json:"limits"`
+	Containers      []ContainerSnapshot           `json:"containers"`
+	IsAgent         bool                          `json:"isAgent"`
+	SessionID       string                        `json:"sessionID,omitempty"`
+	SessionName     string                        `json:"sessionName,omitempty"`
+	Username        string                        `json:"username,omitempty"`
+	ResourceScaling *AgentResourceScalingSnapshot `json:"resourceScaling,omitempty"`
+}
+
+type AgentResourceScalingSnapshot struct {
+	Mode                     string     `json:"mode"`
+	ManualLimits             *Resources `json:"manualLimits,omitempty"`
+	DesiredResources         Resources  `json:"desiredResources"`
+	ActualResources          *Resources `json:"actualResources"`
+	ActualResourcesAvailable bool       `json:"actualResourcesAvailable"`
+	LoadClass                string     `json:"loadClass,omitempty"`
+	RecommendedCPUMillicores int64      `json:"recommendedCPUMillicores,omitempty"`
+	LastAppliedAt            *time.Time `json:"lastAppliedAt,omitempty"`
+	LastError                string     `json:"lastError,omitempty"`
+	WorkState                string     `json:"workState,omitempty"`
+	MinCPUMillicores         int64      `json:"minCPUMillicores"`
+	MaxCPUMillicores         int64      `json:"maxCPUMillicores"`
+	MinMemoryBytes           int64      `json:"minMemoryBytes"`
+	MaxMemoryBytes           int64      `json:"maxMemoryBytes"`
 }
 
 type PodResizeSnapshot struct {
@@ -67,6 +87,12 @@ type ClusterSnapshot struct {
 type ResizeRequest struct {
 	CPUMillicores int64 `json:"cpuMillicores"`
 	MemoryBytes   int64 `json:"memoryBytes"`
+}
+
+type ResourceScalingResponse struct {
+	ObservedAt time.Time `json:"observedAt"`
+	AgentResourceScalingSnapshot
+	Resize *PodResizeSnapshot `json:"resize"`
 }
 
 type AgentOwner struct {

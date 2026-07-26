@@ -10,8 +10,11 @@ import (
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/Amsors/Bosun/backend/internal/session"
+	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
+	"github.com/Amsors/Bosun/operator/pkg/resourcepolicy"
 	"github.com/Amsors/Bosun/operator/pkg/sessionidentity"
 )
 
@@ -21,7 +24,6 @@ const agentContainerName = "agent"
 
 var (
 	ErrInvalidResize = errors.New("invalid agent resource limits")
-	ErrNotRunning    = errors.New("agent Pod is not running")
 )
 
 type SessionStore interface {
@@ -70,10 +72,17 @@ func (s *Service) Session(ctx context.Context, userID, sessionID uuid.UUID) (Ses
 	if available {
 		metricPtr = &metric
 	}
+	cr, err := s.source.GetAgentSession(ctx, record.CRNamespace, record.CRName)
+	if apierrors.IsNotFound(err) {
+		return SessionSnapshot{}, session.ErrNotFound
+	}
+	if err != nil {
+		return SessionSnapshot{}, fmt.Errorf("get session AgentSession: %w", err)
+	}
 	return SessionSnapshot{
 		ObservedAt:       s.now(),
 		MetricsAvailable: available,
-		Pod:              snapshotPod(pod, metricPtr, nil),
+		Pod:              snapshotPod(pod, metricPtr, nil, map[string]*bosunv1alpha1.AgentSession{cr.Spec.SessionID: cr}),
 	}, nil
 }
 
@@ -91,6 +100,14 @@ func (s *Service) Cluster(ctx context.Context) (ClusterSnapshot, error) {
 	owners, err := s.owners.ListAgentOwners(ctx)
 	if err != nil {
 		return ClusterSnapshot{}, err
+	}
+	sessions, err := s.source.ListAgentSessions(ctx)
+	if err != nil {
+		return ClusterSnapshot{}, fmt.Errorf("list AgentSessions: %w", err)
+	}
+	scalingBySession := make(map[string]*bosunv1alpha1.AgentSession, len(sessions))
+	for i := range sessions {
+		scalingBySession[sessions[i].Spec.SessionID] = &sessions[i]
 	}
 
 	podMetrics, podMetricsErr := s.source.ListPodMetrics(ctx)
@@ -123,7 +140,7 @@ func (s *Service) Cluster(ctx context.Context) (ClusterSnapshot, error) {
 			copy := value
 			metric = &copy
 		}
-		result.Pods = append(result.Pods, snapshotPod(&pods[i], metric, owners))
+		result.Pods = append(result.Pods, snapshotPod(&pods[i], metric, owners, scalingBySession))
 	}
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].Name < result.Nodes[j].Name })
 	sort.Slice(result.Pods, func(i, j int) bool {
@@ -139,52 +156,97 @@ func (s *Service) ResizeAgent(
 	ctx context.Context,
 	sessionID uuid.UUID,
 	request ResizeRequest,
-) (SessionSnapshot, error) {
+) (ResourceScalingResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	pods, err := s.source.ListPods(ctx)
+	sessions, err := s.source.ListAgentSessions(ctx)
 	if err != nil {
-		return SessionSnapshot{}, fmt.Errorf("list Pods before resize: %w", err)
+		return ResourceScalingResponse{}, fmt.Errorf("list AgentSessions before resource update: %w", err)
 	}
-	pod := agentPodForSession(pods, sessionID.String())
-	if pod == nil {
-		return SessionSnapshot{}, session.ErrNotFound
+	cr := agentSessionForID(sessions, sessionID.String())
+	if cr == nil {
+		return ResourceScalingResponse{}, session.ErrNotFound
 	}
-	if pod.Status.Phase != corev1.PodRunning || !pod.DeletionTimestamp.IsZero() {
-		return SessionSnapshot{}, ErrNotRunning
+	limits := bosunv1alpha1.ResourceValues(request)
+	if err := resourcepolicy.ValidateManualLimits(cr.Spec.Tier, limits); err != nil {
+		return ResourceScalingResponse{}, fmt.Errorf("%w: %v", ErrInvalidResize, err)
 	}
-	agent := findContainer(pod, agentContainerName)
-	if agent == nil {
-		return SessionSnapshot{}, session.ErrNotFound
-	}
-	limits := Resources(request)
-	if err := validateResize(agent, limits); err != nil {
-		return SessionSnapshot{}, err
-	}
-	updated, err := s.source.ResizePod(ctx, pod.Namespace, pod.Name, agentContainerName, limits)
+	updated, err := s.source.UpdateResourceScaling(
+		ctx,
+		cr.Namespace,
+		cr.Name,
+		sessionID.String(),
+		&bosunv1alpha1.ResourceScalingSpec{
+			Mode:         bosunv1alpha1.ResourceScalingModeManual,
+			ManualLimits: &limits,
+		},
+	)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return SessionSnapshot{}, session.ErrNotFound
+			return ResourceScalingResponse{}, session.ErrNotFound
 		}
-		if apierrors.IsInvalid(err) {
-			return SessionSnapshot{}, fmt.Errorf("%w: %v", ErrInvalidResize, err)
-		}
-		return SessionSnapshot{}, fmt.Errorf("resize agent Pod: %w", err)
+		return ResourceScalingResponse{}, fmt.Errorf("persist Manual resource intent: %w", err)
 	}
-	metric, metricErr := s.source.GetPodMetric(ctx, updated.Namespace, updated.Name)
-	available := metricErr == nil
-	var metricPtr *PodMetric
-	if available {
-		metricPtr = &metric
-	}
-	return SessionSnapshot{
-		ObservedAt:       s.now(),
-		MetricsAvailable: available,
-		Pod:              snapshotPod(updated, metricPtr, nil),
-	}, nil
+	return s.resourceScalingResponse(ctx, updated)
 }
 
-func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwner) PodSnapshot {
+func (s *Service) RestoreAuto(
+	ctx context.Context,
+	sessionID uuid.UUID,
+) (ResourceScalingResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	sessions, err := s.source.ListAgentSessions(ctx)
+	if err != nil {
+		return ResourceScalingResponse{}, fmt.Errorf("list AgentSessions before restoring Auto: %w", err)
+	}
+	cr := agentSessionForID(sessions, sessionID.String())
+	if cr == nil {
+		return ResourceScalingResponse{}, session.ErrNotFound
+	}
+	updated, err := s.source.UpdateResourceScaling(
+		ctx,
+		cr.Namespace,
+		cr.Name,
+		sessionID.String(),
+		&bosunv1alpha1.ResourceScalingSpec{Mode: bosunv1alpha1.ResourceScalingModeAuto},
+	)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return ResourceScalingResponse{}, session.ErrNotFound
+		}
+		return ResourceScalingResponse{}, fmt.Errorf("persist Auto resource intent: %w", err)
+	}
+	return s.resourceScalingResponse(ctx, updated)
+}
+
+func (s *Service) resourceScalingResponse(
+	ctx context.Context,
+	cr *bosunv1alpha1.AgentSession,
+) (ResourceScalingResponse, error) {
+	var pod *corev1.Pod
+	current, err := s.source.GetPod(ctx, cr.Namespace, sessionidentity.PodName(cr.Spec.SessionID))
+	if err == nil {
+		pod = current
+	} else if !apierrors.IsNotFound(err) {
+		return ResourceScalingResponse{}, fmt.Errorf("get Agent Pod after resource intent update: %w", err)
+	}
+	response := ResourceScalingResponse{
+		ObservedAt:                   s.now(),
+		AgentResourceScalingSnapshot: snapshotAgentScaling(cr, pod),
+	}
+	if pod != nil {
+		response.Resize = podResizeSnapshot(pod)
+	}
+	return response, nil
+}
+
+func snapshotPod(
+	pod *corev1.Pod,
+	metric *PodMetric,
+	owners map[string]AgentOwner,
+	scalingBySession map[string]*bosunv1alpha1.AgentSession,
+) PodSnapshot {
 	result := PodSnapshot{
 		Namespace: pod.Namespace,
 		Name:      pod.Name,
@@ -206,6 +268,11 @@ func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwne
 			Name:     container.Name,
 			Requests: resourceList(container.Resources.Requests),
 			Limits:   resourceList(container.Resources.Limits),
+		}
+		if status := findContainerStatus(pod, container.Name); status != nil && status.Resources != nil {
+			actual := resourceList(status.Resources.Limits)
+			item.ActualLimits = &actual
+			item.ActualResourcesAvailable = true
 		}
 		result.Requests = add(result.Requests, item.Requests)
 		result.Limits = add(result.Limits, item.Limits)
@@ -231,28 +298,65 @@ func snapshotPod(pod *corev1.Pod, metric *PodMetric, owners map[string]AgentOwne
 		result.Username = owner.Username
 		result.SessionName = owner.SessionName
 	}
+	if result.IsAgent && scalingBySession != nil {
+		if cr := scalingBySession[result.SessionID]; cr != nil {
+			scaling := snapshotAgentScaling(cr, pod)
+			result.ResourceScaling = &scaling
+		}
+	}
 	return result
 }
 
-func agentPodForSession(pods []corev1.Pod, sessionID string) *corev1.Pod {
-	for i := range pods {
-		pod := &pods[i]
-		if pod.Labels["bosun.io/session"] == sessionID &&
-			pod.Labels["app.kubernetes.io/managed-by"] == "bosun" {
-			return pod
+func snapshotAgentScaling(
+	cr *bosunv1alpha1.AgentSession,
+	pod *corev1.Pod,
+) AgentResourceScalingSnapshot {
+	effective := cr.Spec.EffectiveResourceScaling()
+	result := AgentResourceScalingSnapshot{Mode: string(effective.Mode)}
+	if effective.ManualLimits != nil {
+		limits := Resources(*effective.ManualLimits)
+		result.ManualLimits = &limits
+	}
+	if policy, err := resourcepolicy.ForTier(cr.Spec.Tier); err == nil {
+		result.MinCPUMillicores = policy.MinCPULimit
+		result.MaxCPUMillicores = policy.MaxCPULimit
+		result.MinMemoryBytes = policy.MinMemoryLimitBytes
+		result.MaxMemoryBytes = policy.MaxMemoryLimitBytes
+	}
+	if cr.Status.ResourceScaling != nil {
+		result.LoadClass = string(cr.Status.ResourceScaling.LoadClass)
+		result.RecommendedCPUMillicores = cr.Status.ResourceScaling.RecommendedCPUMillicores
+		result.LastError = cr.Status.ResourceScaling.LastError
+		if cr.Status.ResourceScaling.LastAppliedAt != nil {
+			value := cr.Status.ResourceScaling.LastAppliedAt.Time
+			result.LastAppliedAt = &value
 		}
 	}
-	return nil
+	if condition := apimeta.FindStatusCondition(cr.Status.Conditions, "Ready"); condition != nil {
+		result.WorkState = condition.Reason
+	}
+	if pod == nil {
+		return result
+	}
+	if agent := findContainer(pod, agentContainerName); agent != nil {
+		result.DesiredResources = resourceList(agent.Resources.Limits)
+	}
+	if status := findContainerStatus(pod, agentContainerName); status != nil && status.Resources != nil {
+		actual := resourceList(status.Resources.Limits)
+		result.ActualResources = &actual
+		result.ActualResourcesAvailable = true
+	}
+	return result
 }
 
-func validateResize(container *corev1.Container, limits Resources) error {
-	if limits.CPUMillicores <= 0 || limits.MemoryBytes <= 0 {
-		return ErrInvalidResize
-	}
-	requests := resourceList(container.Resources.Requests)
-	if limits.CPUMillicores < requests.CPUMillicores ||
-		limits.MemoryBytes < requests.MemoryBytes {
-		return fmt.Errorf("%w: limits must be greater than or equal to requests", ErrInvalidResize)
+func agentSessionForID(
+	sessions []bosunv1alpha1.AgentSession,
+	sessionID string,
+) *bosunv1alpha1.AgentSession {
+	for i := range sessions {
+		if sessions[i].Spec.SessionID == sessionID {
+			return &sessions[i]
+		}
 	}
 	return nil
 }
@@ -271,6 +375,15 @@ func podResizeSnapshot(pod *corev1.Pod) *PodResizeSnapshot {
 					Message: condition.Message,
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func findContainerStatus(pod *corev1.Pod, name string) *corev1.ContainerStatus {
+	for i := range pod.Status.ContainerStatuses {
+		if pod.Status.ContainerStatuses[i].Name == name {
+			return &pod.Status.ContainerStatuses[i]
 		}
 	}
 	return nil

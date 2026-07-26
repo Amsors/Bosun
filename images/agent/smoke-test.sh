@@ -52,9 +52,9 @@ docker exec "${container}" test ! -w /usr/local/lib/bosun/hooks/session-start
 docker exec "${container}" test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
 docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/.claude.json)" = "10001:10001"
 docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/.claude/settings.json)" = "10001:10001"
-docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/.bosun-home/cpu_mem_stress.py)" = "10001:10001"
-docker exec "${container}" test -x /workspace/.bosun-home/cpu_mem_stress.py
-docker exec "${container}" /workspace/.bosun-home/cpu_mem_stress.py --help >/dev/null
+docker exec "${container}" test "$(docker exec "${container}" stat -c '%u:%g' /workspace/cpu_mem_stress.py)" = "10001:10001"
+docker exec "${container}" test -x /workspace/cpu_mem_stress.py
+docker exec "${container}" /workspace/cpu_mem_stress.py --help >/dev/null
 docker exec "${container}" jq -e '.hasCompletedOnboarding == true' /workspace/.bosun-home/.claude.json >/dev/null
 docker exec "${container}" jq -e \
   '.permissions.defaultMode == "bypassPermissions" and

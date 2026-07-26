@@ -87,6 +87,37 @@ spec:
                 required:
                 - mode
                 type: object
+              resourceScaling:
+                description: |-
+                  ResourceScaling is nil only on objects created before resource scaling was introduced.
+                  A nil value is interpreted as Auto.
+                properties:
+                  manualLimits:
+                    properties:
+                      cpuMillicores:
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      memoryBytes:
+                        format: int64
+                        minimum: 1
+                        type: integer
+                    required:
+                    - cpuMillicores
+                    - memoryBytes
+                    type: object
+                  mode:
+                    default: Auto
+                    enum:
+                    - Auto
+                    - Manual
+                    type: string
+                required:
+                - mode
+                type: object
+                x-kubernetes-validations:
+                - message: manualLimits must be set only in Manual mode
+                  rule: 'self.mode == ''Manual'' ? has(self.manualLimits) : !has(self.manualLimits)'
               resumeNonce:
                 pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$
                 type: string
@@ -225,6 +256,25 @@ spec:
                 type: string
               pvcName:
                 type: string
+              resourceScaling:
+                properties:
+                  lastAppliedAt:
+                    format: date-time
+                    type: string
+                  lastError:
+                    type: string
+                  loadClass:
+                    enum:
+                    - Unknown
+                    - WarmingUp
+                    - CPUHigh
+                    - CPULow
+                    - Stable
+                    type: string
+                  recommendedCPUMillicores:
+                    format: int64
+                    type: integer
+                type: object
               runtimeCheckpoint:
                 properties:
                   agentImageDigest:

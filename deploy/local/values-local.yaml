@@ -9,6 +9,11 @@ agent:
   imagePullPolicy: Always
   idleScanInterval: 5s
 
+resourceAutoscaling:
+  sampleInterval: 3s
+  scaleUpCooldown: 5s
+  scaleDownCooldown: 30s
+
 auth:
   trustedProxyHeader: ""
 
