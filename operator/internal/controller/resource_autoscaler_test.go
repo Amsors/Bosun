@@ -347,7 +347,7 @@ func TestResourceAutoscalerKeepsLimitWhenMetricsOrActualResourcesAreUnavailable(
 func TestResourceAutoscalerRequiresSafeWorkStateForScaleDown(t *testing.T) {
 	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
 	session, _, k8s := autoScalingFixture(t)
-	session.Status.Conditions[0].Reason = "AgentWorking"
+	session.Status.Conditions[0].Reason = agentWorkingReason
 	if err := k8s.Status().Update(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
