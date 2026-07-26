@@ -23,3 +23,9 @@ options:
       - arg: --secrets-encryption
         nodeFilters:
           - server:*
+      # 课堂演示使用 1 秒 cAdvisor housekeeping，使 backend 的相邻计数器差分
+      # 能真实反映秒级 CPU 与 working-set 内存变化。
+      - arg: --kubelet-arg=housekeeping-interval=1s
+        nodeFilters:
+          - server:*
+          - agent:*

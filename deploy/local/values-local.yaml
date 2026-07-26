@@ -10,7 +10,7 @@ agent:
   idleScanInterval: 5s
 
 resourceAutoscaling:
-  sampleInterval: 3s
+  sampleInterval: 2s
   scaleUpCooldown: 5s
   scaleDownCooldown: 30s
 

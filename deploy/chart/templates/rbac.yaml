@@ -58,7 +58,8 @@ subjects:
     name: bosun-operator
     namespace: {{ .Release.Namespace }}
 ---
-# backend API 对 CR 做 CRUD，并为公开的课程展示监控页读取集群 Pod、Node 与 metrics-server 数据；
+# backend API 对 CR 做 CRUD，并通过 Node proxy 读取 Kubelet Summary API 秒级资源数据；
+# metrics-server 作为实时采样尚未预热或不可用时的回退；
 # 不授予 status 写权限（status 由 operator 独占）。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -73,6 +74,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]

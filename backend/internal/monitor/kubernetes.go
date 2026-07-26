@@ -2,7 +2,9 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -26,7 +28,21 @@ var (
 )
 
 type PodMetric struct {
+	ObservedAt time.Time
+	Window     time.Duration
+	Source     string
 	Containers map[string]Resources
+}
+
+type ContainerCounter struct {
+	CPUUsageSeconds       float64
+	MemoryWorkingSetBytes int64
+	ObservedAt            time.Time
+}
+
+type PodCounterMetric struct {
+	ObservedAt time.Time
+	Containers map[string]ContainerCounter
 }
 
 type Source interface {
@@ -36,6 +52,7 @@ type Source interface {
 	GetPodMetric(context.Context, string, string) (PodMetric, error)
 	ListPodMetrics(context.Context) (map[string]PodMetric, error)
 	ListNodeMetrics(context.Context) (map[string]Resources, error)
+	GetNodePodCounters(context.Context, string) (map[string]PodCounterMetric, error)
 	GetAgentSession(context.Context, string, string) (*bosunv1alpha1.AgentSession, error)
 	ListAgentSessions(context.Context) ([]bosunv1alpha1.AgentSession, error)
 	UpdateResourceScaling(
@@ -195,15 +212,42 @@ func (s *KubernetesSource) ListNodeMetrics(ctx context.Context) (map[string]Reso
 	return result, nil
 }
 
+func (s *KubernetesSource) GetNodePodCounters(
+	ctx context.Context,
+	nodeName string,
+) (map[string]PodCounterMetric, error) {
+	raw, err := s.core.CoreV1().RESTClient().Get().
+		Resource("nodes").
+		Name(nodeName).
+		SubResource("proxy").
+		Suffix("stats", "summary").
+		Do(ctx).
+		Raw()
+	if err != nil {
+		return nil, err
+	}
+	return podCountersFromSummary(raw)
+}
+
 func podMetricFromUnstructured(item *unstructured.Unstructured) (PodMetric, error) {
 	containers, found, err := unstructured.NestedSlice(item.Object, "containers")
 	if err != nil {
 		return PodMetric{}, fmt.Errorf("decode PodMetrics %s/%s containers: %w", item.GetNamespace(), item.GetName(), err)
 	}
 	if !found {
-		return PodMetric{Containers: map[string]Resources{}}, nil
+		return PodMetric{
+			ObservedAt: metricTimestamp(item),
+			Window:     metricWindow(item),
+			Source:     "metrics-server",
+			Containers: map[string]Resources{},
+		}, nil
 	}
-	result := PodMetric{Containers: make(map[string]Resources, len(containers))}
+	result := PodMetric{
+		ObservedAt: metricTimestamp(item),
+		Window:     metricWindow(item),
+		Source:     "metrics-server",
+		Containers: make(map[string]Resources, len(containers)),
+	}
 	for _, raw := range containers {
 		container, ok := raw.(map[string]any)
 		if !ok {
@@ -219,6 +263,80 @@ func podMetricFromUnstructured(item *unstructured.Unstructured) (PodMetric, erro
 			return PodMetric{}, fmt.Errorf("decode PodMetrics %s/%s container %s: %w", item.GetNamespace(), item.GetName(), name, err)
 		}
 		result.Containers[name] = value
+	}
+	return result, nil
+}
+
+func metricTimestamp(item *unstructured.Unstructured) time.Time {
+	raw, _, _ := unstructured.NestedString(item.Object, "timestamp")
+	timestamp, _ := time.Parse(time.RFC3339Nano, raw)
+	return timestamp
+}
+
+func metricWindow(item *unstructured.Unstructured) time.Duration {
+	raw, _, _ := unstructured.NestedString(item.Object, "window")
+	window, _ := time.ParseDuration(raw)
+	return window
+}
+
+type kubeletSummary struct {
+	Pods []struct {
+		PodRef struct {
+			Namespace string `json:"namespace"`
+			Name      string `json:"name"`
+		} `json:"podRef"`
+		Containers []struct {
+			Name string `json:"name"`
+			CPU  *struct {
+				Time                 string  `json:"time"`
+				UsageCoreNanoSeconds *uint64 `json:"usageCoreNanoSeconds"`
+			} `json:"cpu"`
+			Memory *struct {
+				WorkingSetBytes *uint64 `json:"workingSetBytes"`
+			} `json:"memory"`
+		} `json:"containers"`
+	} `json:"pods"`
+}
+
+func podCountersFromSummary(raw []byte) (map[string]PodCounterMetric, error) {
+	var summary kubeletSummary
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		return nil, fmt.Errorf("parse Kubelet stats summary: %w", err)
+	}
+
+	result := make(map[string]PodCounterMetric, len(summary.Pods))
+	for _, pod := range summary.Pods {
+		if pod.PodRef.Namespace == "" || pod.PodRef.Name == "" {
+			continue
+		}
+		podMetric := PodCounterMetric{
+			Containers: make(map[string]ContainerCounter, len(pod.Containers)),
+		}
+		for _, container := range pod.Containers {
+			if container.Name == "" || container.CPU == nil ||
+				container.CPU.UsageCoreNanoSeconds == nil {
+				continue
+			}
+			observedAt, err := time.Parse(time.RFC3339Nano, container.CPU.Time)
+			if err != nil || observedAt.IsZero() {
+				continue
+			}
+			counter := ContainerCounter{
+				CPUUsageSeconds: float64(*container.CPU.UsageCoreNanoSeconds) /
+					float64(time.Second),
+				ObservedAt: observedAt.UTC(),
+			}
+			if container.Memory != nil && container.Memory.WorkingSetBytes != nil {
+				counter.MemoryWorkingSetBytes = int64(*container.Memory.WorkingSetBytes)
+			}
+			podMetric.Containers[container.Name] = counter
+			if podMetric.ObservedAt.IsZero() || observedAt.Before(podMetric.ObservedAt) {
+				podMetric.ObservedAt = observedAt.UTC()
+			}
+		}
+		if len(podMetric.Containers) > 0 {
+			result[pod.PodRef.Namespace+"/"+pod.PodRef.Name] = podMetric
+		}
 	}
 	return result, nil
 }

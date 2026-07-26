@@ -13,7 +13,11 @@ vi.mock('../api/monitor', () => ({
   },
 }))
 
-function snapshot(agentCPU: number, agentMemoryMiB: number): SessionResourceSnapshot {
+function snapshot(
+  agentCPU: number,
+  agentMemoryMiB: number,
+  metricsObservedAt = '2026-07-24T03:00:00Z',
+): SessionResourceSnapshot {
   const mebibyte = 1024 * 1024
   return {
     observedAt: '2026-07-24T03:00:00Z',
@@ -27,6 +31,9 @@ function snapshot(agentCPU: number, agentMemoryMiB: number): SessionResourceSnap
       ready: true,
       restarts: 0,
       createdAt: '2026-07-24T02:00:00Z',
+      metricsObservedAt,
+      metricsWindowSeconds: 1,
+      metricsSource: 'kubelet-summary',
       usage: { cpuMillicores: 100, memoryBytes: 256 * mebibyte },
       requests: { cpuMillicores: 250, memoryBytes: 512 * mebibyte },
       limits: {
@@ -119,6 +126,35 @@ describe('ResourceUsagePanel', () => {
     expect(getSessionResources).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(1)
     expect(getSessionResources).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+  })
+
+  it('records chart points only when the real metric timestamp changes', async () => {
+    vi.useFakeTimers()
+    getSessionResources
+      .mockResolvedValueOnce(snapshot(450, 960, '2026-07-24T03:00:00Z'))
+      .mockResolvedValueOnce(snapshot(450, 960, '2026-07-24T03:00:00Z'))
+      .mockResolvedValueOnce(snapshot(700, 960, '2026-07-24T03:00:01Z'))
+
+    const wrapper = mount(ResourceUsagePanel, {
+      props: {
+        sessionId: '018f9c6e-1234-7000-8000-abcdef012501',
+        getAccessToken: () => 'access-token',
+        refreshAccessToken: async () => 'access-token',
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('最近 1 个采样点')
+    expect(wrapper.text()).toContain('Kubelet 秒级采样')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('最近 1 个采样点')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('最近 2 个采样点')
 
     wrapper.unmount()
   })
