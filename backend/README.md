@@ -30,7 +30,7 @@ working set，CPU 使用相邻累计计数器按 Summary 中的真实采样时�
 - `GET /api/v1/admin/cluster`：课程展示用公开接口，返回全局 Node、Pod 与 Agent 所属用户。
 - `PUT /api/v1/admin/sessions/:id/resources`：课程展示用公开接口，将
   `AgentSession.spec.resourceScaling` 持久化为 Manual intent。请求体为
-  `{"cpuMillicores":700,"memoryBytes":1073741824}`，CPU / memory 必须位于对应 tier
+  `{"cpuMillicores":700,"memoryBytes":3221225472}`，CPU / memory 必须位于统一资源边界
   的 hard bounds。
 - `DELETE /api/v1/admin/sessions/:id/resources`：将会话恢复为 Auto 模式并清空 Manual
   intent。

@@ -210,7 +210,7 @@ func TestResizeAgentPersistsManualIntentWithoutCallingPodResize(t *testing.T) {
 
 	result, err := service.ResizeAgent(context.Background(), sessionID, ResizeRequest{
 		CPUMillicores: 700,
-		MemoryBytes:   1536 * 1024 * 1024,
+		MemoryBytes:   3 * 1024 * 1024 * 1024,
 	})
 	if err != nil {
 		t.Fatalf("ResizeAgent() error = %v", err)
@@ -221,7 +221,7 @@ func TestResizeAgentPersistsManualIntentWithoutCallingPodResize(t *testing.T) {
 		t.Fatalf("updated scaling = %#v", source.updatedScaling)
 	}
 	if source.updatedScaling.ManualLimits.CPUMillicores != 700 ||
-		source.updatedScaling.ManualLimits.MemoryBytes != 1536*1024*1024 {
+		source.updatedScaling.ManualLimits.MemoryBytes != 3*1024*1024*1024 {
 		t.Fatalf("manual limits = %#v", source.updatedScaling.ManualLimits)
 	}
 	if result.Mode != string(bosunv1alpha1.ResourceScalingModeManual) ||
@@ -230,7 +230,7 @@ func TestResizeAgentPersistsManualIntentWithoutCallingPodResize(t *testing.T) {
 	}
 }
 
-func TestResizeAgentRejectsLimitsOutsideTierBounds(t *testing.T) {
+func TestResizeAgentRejectsLimitsOutsideSharedBounds(t *testing.T) {
 	sessionID := uuid.MustParse("018f9c6e-1234-7000-8000-abcdef012501")
 	pod := agentPod()
 	pod.Labels["bosun.io/session"] = sessionID.String()
@@ -446,7 +446,6 @@ func agentSession(sessionID string) bosunv1alpha1.AgentSession {
 		},
 		Spec: bosunv1alpha1.AgentSessionSpec{
 			SessionID: sessionID,
-			Tier:      bosunv1alpha1.SessionTierSmall,
 			ResourceScaling: &bosunv1alpha1.ResourceScalingSpec{
 				Mode: bosunv1alpha1.ResourceScalingModeAuto,
 			},

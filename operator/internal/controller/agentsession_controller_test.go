@@ -21,25 +21,25 @@ import (
 	"github.com/Amsors/Bosun/operator/pkg/sessionidentity"
 )
 
-func TestAgentSessionReconcileCreatesSecureTieredWorkloadAndIsIdempotent(t *testing.T) {
+func TestAgentSessionReconcileCreatesSecureUnifiedWorkloadAndIsIdempotent(t *testing.T) {
 	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012401", "018f9c6e-1234-7000-8000-abcdef012501")
 	reconciler := newAgentSessionReconciler()
 	reconcileAgentSession(t, reconciler, session, 4)
 
-	assertSmallSessionPVC(t, session)
+	assertSessionPVC(t, session)
 	assertSessionServiceAccount(t, session)
 	pod := getAgentPod(t, session)
-	assertSecureSmallSessionPod(t, session, &pod)
+	assertSecureSessionPod(t, session, &pod)
 	assertAgentSessionPodReconcileIsIdempotent(t, reconciler, session, &pod)
 }
 
-func assertSmallSessionPVC(t *testing.T, session *bosunv1alpha1.AgentSession) {
+func assertSessionPVC(t *testing.T, session *bosunv1alpha1.AgentSession) {
 	t.Helper()
 	var pvc corev1.PersistentVolumeClaim
 	getObject(t, namespacedName(session.Namespace, sessionidentity.PVCName(session.Spec.SessionID)), &pvc)
 	assertSessionLabels(t, pvc.Labels, session)
 	storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-	if storage.Cmp(resource.MustParse("5Gi")) != 0 || pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "local-path" {
+	if storage.Cmp(resource.MustParse("10Gi")) != 0 || pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "local-path" {
 		t.Fatalf("PVC spec = %#v", pvc.Spec)
 	}
 }
@@ -64,7 +64,7 @@ func getAgentPod(t *testing.T, session *bosunv1alpha1.AgentSession) corev1.Pod {
 	return pod
 }
 
-func assertSecureSmallSessionPod(
+func assertSecureSessionPod(
 	t *testing.T,
 	session *bosunv1alpha1.AgentSession,
 	pod *corev1.Pod,
@@ -92,9 +92,9 @@ func assertSecureSmallSessionPod(
 	}
 	assertRestrictedContainer(t, pod.Spec.Containers[0])
 	assertRestrictedContainer(t, pod.Spec.Containers[1])
-	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("240m")) != 0 ||
+	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("500m")) != 0 ||
 		pod.Spec.Containers[1].Resources.Requests.Cpu().Cmp(resource.MustParse("10m")) != 0 {
-		t.Fatalf("small CPU requests = agent %s proxy %s", pod.Spec.Containers[0].Resources.Requests.Cpu(), pod.Spec.Containers[1].Resources.Requests.Cpu())
+		t.Fatalf("CPU requests = agent %s proxy %s", pod.Spec.Containers[0].Resources.Requests.Cpu(), pod.Spec.Containers[1].Resources.Requests.Cpu())
 	}
 	if len(pod.Spec.Containers[0].ResizePolicy) != 2 ||
 		pod.Spec.Containers[0].ResizePolicy[0].RestartPolicy != corev1.NotRequired ||
@@ -138,28 +138,23 @@ func assertAgentSessionPodReconcileIsIdempotent(
 	}
 }
 
-func TestAgentSessionMediumTierUsesFixedBudget(t *testing.T) {
-	ctx := context.Background()
+func TestAgentSessionUsesUnifiedResourceBudget(t *testing.T) {
 	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012407", "018f9c6e-1234-7000-8000-abcdef012507")
-	var current bosunv1alpha1.AgentSession
-	getObject(t, clientKey(session), &current)
-	current.Spec.Tier = bosunv1alpha1.SessionTierMedium
-	if err := testClient.Update(ctx, &current); err != nil {
-		t.Fatalf("set medium tier: %v", err)
-	}
 	reconciler := newAgentSessionReconciler()
 	reconcileAgentSession(t, reconciler, session, 4)
 	var pvc corev1.PersistentVolumeClaim
 	getObject(t, namespacedName(session.Namespace, sessionidentity.PVCName(session.Spec.SessionID)), &pvc)
 	storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
 	if storage.Cmp(resource.MustParse("10Gi")) != 0 {
-		t.Fatalf("medium PVC storage = %s, want 10Gi", storage.String())
+		t.Fatalf("PVC storage = %s, want 10Gi", storage.String())
 	}
 	var pod corev1.Pod
 	getObject(t, namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)), &pod)
-	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("490m")) != 0 ||
-		pod.Spec.Containers[0].Resources.Limits.Memory().Cmp(resource.MustParse("1984Mi")) != 0 {
-		t.Fatalf("medium agent resources = %#v", pod.Spec.Containers[0].Resources)
+	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("500m")) != 0 ||
+		pod.Spec.Containers[0].Resources.Requests.Memory().Cmp(resource.MustParse("2Gi")) != 0 ||
+		pod.Spec.Containers[0].Resources.Limits.Cpu().Cmp(resource.MustParse("500m")) != 0 ||
+		pod.Spec.Containers[0].Resources.Limits.Memory().Cmp(resource.MustParse("3Gi")) != 0 {
+		t.Fatalf("agent resources = %#v", pod.Spec.Containers[0].Resources)
 	}
 }
 
@@ -476,7 +471,7 @@ func createAgentSession(t *testing.T, sessionID, userID string) *bosunv1alpha1.A
 		Spec: bosunv1alpha1.AgentSessionSpec{
 			SessionID: sessionID, UserID: userID,
 			DesiredState: bosunv1alpha1.DesiredStateRunning, ResumeNonce: sessionID,
-			Tier: bosunv1alpha1.SessionTierSmall, Runtime: bosunv1alpha1.RuntimeClaudeCode,
+			Runtime:       bosunv1alpha1.RuntimeClaudeCode,
 			Provider:      bosunv1alpha1.ProviderSpec{Mode: bosunv1alpha1.ProviderModePlatform},
 			StoragePolicy: bosunv1alpha1.StoragePolicyLocal, IdleTimeoutSeconds: 1800,
 			ActiveDeadlineSeconds: 28800, PriorityClassName: normalPriorityClass,

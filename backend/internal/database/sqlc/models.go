@@ -38,7 +38,6 @@ type BosunSession struct {
 	UserID               uuid.UUID  `json:"user_id"`
 	CrNamespace          string     `json:"cr_namespace"`
 	CrName               string     `json:"cr_name"`
-	Tier                 string     `json:"tier"`
 	Runtime              string     `json:"runtime"`
 	ProviderMode         string     `json:"provider_mode"`
 	ProviderCredentialID *uuid.UUID `json:"provider_credential_id"`

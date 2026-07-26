@@ -80,7 +80,7 @@ func (w *SampleWindow) Samples() []ResourceSample {
 func Recommendation(
 	samples []ResourceSample,
 	currentLimit int64,
-	policy TierPolicy,
+	policy ResourcePolicy,
 ) (bosunv1alpha1.ResourceLoadClass, int64) {
 	if currentLimit <= 0 {
 		return bosunv1alpha1.ResourceLoadClassUnknown, 0
@@ -121,15 +121,15 @@ func Recommendation(
 	return bosunv1alpha1.ResourceLoadClassStable, 0
 }
 
-// ScaleUpTarget applies the 1.50 maximum increase ratio and tier hard maximum.
-func ScaleUpTarget(currentLimit int64, policy TierPolicy) int64 {
+// ScaleUpTarget applies the 1.50 maximum increase ratio and hard maximum.
+func ScaleUpTarget(currentLimit int64, policy ResourcePolicy) int64 {
 	target := currentLimit * 3 / 2
 	target = min(target, policy.MaxCPULimit)
 	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)
 }
 
-// ScaleDownTarget halves idle CPU capacity while respecting the tier hard minimum.
-func ScaleDownTarget(currentLimit int64, policy TierPolicy) int64 {
+// ScaleDownTarget halves idle CPU capacity while respecting the hard minimum.
+func ScaleDownTarget(currentLimit int64, policy ResourcePolicy) int64 {
 	target := (currentLimit + 1) / 2
 	target = max(target, policy.MinCPULimit)
 	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)

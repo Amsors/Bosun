@@ -138,7 +138,7 @@ func TestKubernetesSourcePersistsResourceScalingIntent(t *testing.T) {
 			Mode: bosunv1alpha1.ResourceScalingModeManual,
 			ManualLimits: &bosunv1alpha1.ResourceValues{
 				CPUMillicores: 700,
-				MemoryBytes:   1536 * 1024 * 1024,
+				MemoryBytes:   3 * 1024 * 1024 * 1024,
 			},
 		},
 	)

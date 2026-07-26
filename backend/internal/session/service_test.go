@@ -436,7 +436,7 @@ func (m *idempotentMemoryStore) CreateWithEventAndIdempotency(ctx context.Contex
 
 func validRequest() CreateRequest {
 	return CreateRequest{
-		Name: "测试会话", Priority: "normal", Tier: "small", Runtime: "claude-code",
+		Name: "测试会话", Priority: "normal", Runtime: "claude-code",
 		Provider: ProviderRequest{Mode: "platform"}, StoragePolicy: "local",
 	}
 }
@@ -448,7 +448,7 @@ func testSession(userID uuid.UUID) Session {
 	return Session{
 		ID: id, UserID: userID, Name: "测试会话", Priority: "normal",
 		CRNamespace: "bosun-u-test", CRName: "sess-test",
-		Tier: "small", Runtime: "claude-code", Provider: Provider{Mode: "platform"},
+		Runtime: "claude-code", Provider: Provider{Mode: "platform"},
 		StoragePolicy: "local", DesiredState: "Running", ResumeNonce: nonce,
 		Phase: "Pending", CreatedAt: now, UpdatedAt: now, Version: 1,
 	}

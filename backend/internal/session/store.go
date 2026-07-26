@@ -66,7 +66,7 @@ func (s *PgxStore) CreateWithEventAndIdempotency(
 	if _, err := qtx.CreateSession(ctx, db.CreateSessionParams{
 		ID: session.ID, UserID: session.UserID, CrNamespace: session.CRNamespace, CrName: session.CRName,
 		DisplayName: session.Name, Priority: session.Priority,
-		Tier: session.Tier, Runtime: session.Runtime, ProviderMode: session.Provider.Mode,
+		Runtime: session.Runtime, ProviderMode: session.Provider.Mode,
 		ProviderCredentialID: session.Provider.CredentialID, StoragePolicy: session.StoragePolicy,
 		DesiredState: session.DesiredState, ResumeNonce: session.ResumeNonce, Phase: session.Phase,
 		PhaseReason: session.PhaseReason, Conditions: conditions, LastActiveAt: session.LastActiveAt,
@@ -307,7 +307,7 @@ func sessionFromRow(row db.BosunSession) (Session, error) {
 	return Session{
 		ID: row.ID, UserID: row.UserID, Name: row.DisplayName, Priority: row.Priority,
 		CRNamespace: row.CrNamespace, CRName: row.CrName,
-		Tier: row.Tier, Runtime: row.Runtime, Provider: Provider{Mode: row.ProviderMode, CredentialID: row.ProviderCredentialID},
+		Runtime: row.Runtime, Provider: Provider{Mode: row.ProviderMode, CredentialID: row.ProviderCredentialID},
 		StoragePolicy: row.StoragePolicy, DesiredState: row.DesiredState, ResumeNonce: row.ResumeNonce,
 		Phase: row.Phase, PhaseReason: row.PhaseReason, Conditions: conditions,
 		LastActiveAt: row.LastActiveAt, CRResourceVersion: row.CrResourceVersion,

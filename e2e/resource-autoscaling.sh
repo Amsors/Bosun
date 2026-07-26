@@ -119,7 +119,7 @@ created="$(
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${BOSUN_E2E_ACCESS_TOKEN}" \
     -H "Idempotency-Key: $(uuidgen)" \
-    --data '{"tier":"small","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}'
+    --data '{"runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}'
 )"
 assert_code_zero <<<"${created}"
 session_id="$(jq -r '.data.id' <<<"${created}")"
@@ -149,7 +149,7 @@ start_stress 90s
 scaled_up="$(
   wait_json 30 5 \
     cluster_snapshot \
-    "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.desiredResources.cpuMillicores > 450 and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores')"
+    "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.desiredResources.cpuMillicores > 500 and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores')"
 )"
 scaled_cpu="$(
   jq -r --arg session_id "${session_id}" \
@@ -166,12 +166,12 @@ wait_json 36 5 \
 manual="$(
   api PUT "/admin/sessions/${session_id}/resources" \
     -H 'Content-Type: application/json' \
-    --data '{"cpuMillicores":650,"memoryBytes":1073741824}'
+    --data '{"cpuMillicores":650,"memoryBytes":3221225472}'
 )"
 assert_code_zero <<<"${manual}"
 wait_json 24 5 \
   cluster_snapshot \
-  "$(scaling_predicate '.resourceScaling.mode == "Manual" and .resourceScaling.actualResources.cpuMillicores == 650 and .resourceScaling.actualResources.memoryBytes == 1073741824')" \
+  "$(scaling_predicate '.resourceScaling.mode == "Manual" and .resourceScaling.actualResources.cpuMillicores == 650 and .resourceScaling.actualResources.memoryBytes == 3221225472')" \
   >/dev/null
 assert_memory_high "manual"
 
@@ -188,7 +188,7 @@ stop_stress
 api DELETE "/admin/sessions/${session_id}/resources" | assert_code_zero
 wait_json 24 5 \
   cluster_snapshot \
-  "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.actualResources.memoryBytes == 1006632960 and (.resourceScaling.loadClass == "WarmingUp" or .resourceScaling.loadClass == "Stable")')" \
+  "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.actualResources.memoryBytes == 3221225472 and (.resourceScaling.loadClass == "WarmingUp" or .resourceScaling.loadClass == "Stable")')" \
   >/dev/null
 assert_memory_high "restored-auto"
 

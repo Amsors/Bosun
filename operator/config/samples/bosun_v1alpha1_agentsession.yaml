@@ -11,7 +11,6 @@ spec:
   userID: 018f1f22-7c20-7a32-8f4a-9d8b6c5e4a31
   desiredState: Running
   resumeNonce: 018f1f24-0000-7abc-8abc-1234567890ab
-  tier: small
   runtime: claude-code
   provider:
     mode: platform

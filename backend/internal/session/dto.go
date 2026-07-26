@@ -11,7 +11,6 @@ type DTO struct {
 	Name          string             `json:"name"`
 	Priority      string             `json:"priority"`
 	DesiredState  string             `json:"desiredState"`
-	Tier          string             `json:"tier"`
 	Runtime       string             `json:"runtime"`
 	Provider      ProviderDTO        `json:"provider"`
 	StoragePolicy string             `json:"storagePolicy"`
@@ -38,7 +37,7 @@ func toDTO(rec Session) DTO {
 	}
 	dto := DTO{
 		ID: rec.ID.String(), Name: rec.Name, Priority: rec.Priority,
-		DesiredState: rec.DesiredState, Tier: rec.Tier, Runtime: rec.Runtime,
+		DesiredState: rec.DesiredState, Runtime: rec.Runtime,
 		Provider: ProviderDTO{Mode: rec.Provider.Mode}, StoragePolicy: rec.StoragePolicy,
 		Phase: rec.Phase, PhaseReason: rec.PhaseReason, Conditions: conditions,
 		CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),

@@ -1,18 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '../api/client'
 import { sessionApi } from '../api/sessions'
 import AppShell from '../components/app-shell.vue'
 import { useAuthStore } from '../stores/auth-store'
-import type { SessionPriority, SessionTier } from '../api/contracts'
+import type { SessionPriority } from '../api/contracts'
 
 const auth = useAuthStore()
 const router = useRouter()
 const name = ref('')
-const memoryMiB = ref(2048)
-const tier = computed<SessionTier>(() => (memoryMiB.value <= 1024 ? 'small' : 'medium'))
 const priority = ref<SessionPriority>('normal')
 const busy = ref(false)
 const error = ref('')
@@ -27,7 +25,6 @@ async function create(): Promise<void> {
       {
         name: name.value.trim(),
         priority: priority.value,
-        tier: tier.value,
         runtime: 'claude-code',
         provider: { mode: 'platform' },
         storagePolicy: 'local',
@@ -76,18 +73,18 @@ async function create(): Promise<void> {
         <p class="field-help">使用任务或项目名称，方便之后快速找到这个工作区。</p>
         <fieldset>
           <legend>调度优先级</legend>
-          <label class="tier priority-option"
+          <label class="priority-option"
             ><input v-model="priority" type="radio" value="high" /><span
               ><strong>高优先级</strong
               ><small>资源紧张时最先启动，适合紧急或演示任务。</small></span
             ></label
           >
-          <label class="tier priority-option"
+          <label class="priority-option"
             ><input v-model="priority" type="radio" value="normal" /><span
               ><strong>普通优先级</strong><small>默认选择，适合日常开发任务。</small></span
             ></label
           >
-          <label class="tier priority-option"
+          <label class="priority-option"
             ><input v-model="priority" type="radio" value="low" /><span
               ><strong>低优先级</strong
               ><small>资源不足时继续排队，适合后台或非紧急任务。</small></span
@@ -100,29 +97,18 @@ async function create(): Promise<void> {
           <div class="resource-setting-row">
             <div>
               <strong>CPU</strong>
-              <small>初始分配约 1 核，运行后由平台根据负载自动调度</small>
+              <small>初始 0.5 核，运行后由平台根据负载自动调度</small>
             </div>
-            <span class="resource-setting-value">自动调度</span>
+            <span class="resource-setting-value">0.5 核起</span>
           </div>
-          <label class="resource-setting-row" for="session-memory">
+          <div class="resource-setting-row">
             <div>
               <strong>内存</strong>
               <small>内存创建后保持固定，不参与 CPU 自动调度</small>
             </div>
-            <span class="resource-memory-input">
-              <input
-                id="session-memory"
-                v-model.number="memoryMiB"
-                type="number"
-                min="1024"
-                max="2048"
-                step="1024"
-                required
-              />
-              MiB
-            </span>
-          </label>
-          <p class="field-help">当前环境支持填写 1024 或 2048 MiB；默认 2048 MiB。</p>
+            <span class="resource-setting-value">request 2 GiB / limit 3 GiB</span>
+          </div>
+          <p class="field-help">所有会话使用统一资源配置，不再区分规格档位。</p>
         </fieldset>
         <p v-if="error" class="alert" role="alert">{{ error }}</p>
         <button class="primary" type="submit" :disabled="busy">
