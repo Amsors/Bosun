@@ -25,6 +25,8 @@ claude_defaults=/usr/local/share/bosun/claude-defaults
 claude_config="${HOME}/.claude.json"
 claude_settings_dir="${HOME}/.claude"
 claude_settings="${claude_settings_dir}/settings.json"
+user_defaults=/usr/local/share/bosun/user-defaults
+cpu_mem_stress="${workspace_path}/cpu_mem_stress.py"
 
 mkdir -p \
   "${HOME}" \
@@ -39,6 +41,10 @@ fi
 
 if [[ ! -e "${claude_settings}" ]]; then
   install -m 0600 "${claude_defaults}/settings.json" "${claude_settings}"
+fi
+
+if [[ ! -e "${cpu_mem_stress}" ]]; then
+  install -m 0755 "${user_defaults}/cpu_mem_stress.py" "${cpu_mem_stress}"
 fi
 
 if [[ -f "${recovery_file}" ]] && /usr/local/bin/bosun-runtime-control validate; then
