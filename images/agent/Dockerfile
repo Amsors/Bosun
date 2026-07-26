@@ -50,7 +50,8 @@ RUN apt-get update \
         /etc/claude-code \
         /usr/local/lib/bosun/hooks \
         /usr/local/share/bosun \
-        /usr/local/share/bosun/claude-defaults
+        /usr/local/share/bosun/claude-defaults \
+        /usr/local/share/bosun/user-defaults
 
 COPY --from=cli /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=cli /usr/local/bin/claude /usr/local/bin/claude
@@ -64,6 +65,7 @@ COPY --chmod=0444 hooks/managed-settings.json /etc/claude-code/managed-settings.
 COPY --chmod=0444 recovery.schema.json /usr/local/share/bosun/recovery.schema.json
 COPY --chmod=0444 files/.claude.json /usr/local/share/bosun/claude-defaults/.claude.json
 COPY --chmod=0444 files/setting.json /usr/local/share/bosun/claude-defaults/settings.json
+COPY --chmod=0555 files/cpu_mem_stress.py /usr/local/share/bosun/user-defaults/cpu_mem_stress.py
 
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     DISABLE_AUTOUPDATER=1 \
