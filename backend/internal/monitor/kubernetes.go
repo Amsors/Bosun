@@ -9,11 +9,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
 )
 
 var (
@@ -28,16 +32,25 @@ type PodMetric struct {
 type Source interface {
 	GetPod(context.Context, string, string) (*corev1.Pod, error)
 	ListPods(context.Context) ([]corev1.Pod, error)
-	ResizePod(context.Context, string, string, string, Resources) (*corev1.Pod, error)
 	ListNodes(context.Context) ([]corev1.Node, error)
 	GetPodMetric(context.Context, string, string) (PodMetric, error)
 	ListPodMetrics(context.Context) (map[string]PodMetric, error)
 	ListNodeMetrics(context.Context) (map[string]Resources, error)
+	GetAgentSession(context.Context, string, string) (*bosunv1alpha1.AgentSession, error)
+	ListAgentSessions(context.Context) ([]bosunv1alpha1.AgentSession, error)
+	UpdateResourceScaling(
+		context.Context,
+		string,
+		string,
+		string,
+		*bosunv1alpha1.ResourceScalingSpec,
+	) (*bosunv1alpha1.AgentSession, error)
 }
 
 type KubernetesSource struct {
 	core    kubernetes.Interface
 	dynamic dynamic.Interface
+	objects client.Client
 }
 
 func NewKubernetesSource(cfg *rest.Config) (*KubernetesSource, error) {
@@ -52,7 +65,15 @@ func NewKubernetesSource(cfg *rest.Config) (*KubernetesSource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create metrics Kubernetes client: %w", err)
 	}
-	return &KubernetesSource{core: coreClient, dynamic: dynamicClient}, nil
+	scheme := runtime.NewScheme()
+	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("register AgentSession scheme: %w", err)
+	}
+	objectClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("create AgentSession Kubernetes client: %w", err)
+	}
+	return &KubernetesSource{core: coreClient, dynamic: dynamicClient, objects: objectClient}, nil
 }
 
 func (s *KubernetesSource) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
@@ -67,35 +88,54 @@ func (s *KubernetesSource) ListPods(ctx context.Context) ([]corev1.Pod, error) {
 	return list.Items, nil
 }
 
-// ResizePod updates only one container's CPU and memory limits through the
-// Kubernetes Pod resize subresource. Requests and all other resource keys are
-// intentionally preserved.
-func (s *KubernetesSource) ResizePod(
+func (s *KubernetesSource) GetAgentSession(
 	ctx context.Context,
-	namespace, name, containerName string,
-	limits Resources,
-) (*corev1.Pod, error) {
-	var updated *corev1.Pod
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		pod, err := s.GetPod(ctx, namespace, name)
-		if err != nil {
+	namespace, name string,
+) (*bosunv1alpha1.AgentSession, error) {
+	var session bosunv1alpha1.AgentSession
+	if err := s.objects.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *KubernetesSource) ListAgentSessions(ctx context.Context) ([]bosunv1alpha1.AgentSession, error) {
+	var sessions bosunv1alpha1.AgentSessionList
+	if err := s.objects.List(ctx, &sessions); err != nil {
+		return nil, err
+	}
+	return sessions.Items, nil
+}
+
+func (s *KubernetesSource) UpdateResourceScaling(
+	ctx context.Context,
+	namespace, name, expectedSessionID string,
+	scaling *bosunv1alpha1.ResourceScalingSpec,
+) (*bosunv1alpha1.AgentSession, error) {
+	var updated bosunv1alpha1.AgentSession
+	key := client.ObjectKey{Namespace: namespace, Name: name}
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var current bosunv1alpha1.AgentSession
+		if err := s.objects.Get(ctx, key, &current); err != nil {
 			return err
 		}
-		container := findContainer(pod, containerName)
-		if container == nil {
-			return fmt.Errorf("container %q is unavailable in Pod %s/%s", containerName, namespace, name)
+		if current.Spec.SessionID != expectedSessionID {
+			return apierrors.NewNotFound(
+				schema.GroupResource{Group: bosunv1alpha1.GroupVersion.Group, Resource: "agentsessions"},
+				name,
+			)
 		}
-		next := container.Resources.Limits.DeepCopy()
-		if next == nil {
-			next = corev1.ResourceList{}
+		current.Spec.ResourceScaling = scaling.DeepCopy()
+		if err := s.objects.Update(ctx, &current); err != nil {
+			return err
 		}
-		next[corev1.ResourceCPU] = *resource.NewMilliQuantity(limits.CPUMillicores, resource.DecimalSI)
-		next[corev1.ResourceMemory] = *resource.NewQuantity(limits.MemoryBytes, resource.BinarySI)
-		container.Resources.Limits = next
-		updated, err = s.core.CoreV1().Pods(namespace).UpdateResize(ctx, name, pod, metav1.UpdateOptions{})
-		return err
+		updated = current
+		return nil
 	})
-	return updated, err
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 func (s *KubernetesSource) ListNodes(ctx context.Context) ([]corev1.Node, error) {

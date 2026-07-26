@@ -33,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
+	"github.com/Amsors/Bosun/operator/pkg/resourcepolicy"
 	"github.com/Amsors/Bosun/operator/pkg/sessionidentity"
 )
 
@@ -47,6 +48,7 @@ const (
 	normalPriorityClass    = "bosun-normal"
 	highPriorityClass      = "bosun-high"
 	deadlineExceededReason = "DeadlineExceeded"
+	awaitingInputReason    = "AwaitingInput"
 	maxTransientRetries    = 10
 	defaultIdleScan        = 30 * time.Second
 	maxHibernateGrace      = int64(30)
@@ -296,7 +298,7 @@ func agentWorkCondition(state AgentWorkState) (string, string) {
 	case AgentWorkStateAwaitingChoice:
 		return "AwaitingChoice", "Claude is waiting for the user to choose the next step"
 	case AgentWorkStateAwaitingInput:
-		return "AwaitingInput", "Claude has finished the current turn and is waiting for user input"
+		return awaitingInputReason, "Claude has finished the current turn and is waiting for user input"
 	case AgentWorkStateStopped:
 		return "AgentStopped", "Claude is not running; the terminal remains available"
 	default:
@@ -552,6 +554,13 @@ func (r *AgentSessionReconciler) desiredPod(
 	pvcName string,
 ) *corev1.Pod {
 	agentRequests, agentLimits := tierAgentResources(session.Spec.Tier)
+	scaling := session.Spec.EffectiveResourceScaling()
+	if scaling.Mode == bosunv1alpha1.ResourceScalingModeManual && scaling.ManualLimits != nil {
+		agentLimits[corev1.ResourceCPU] =
+			*resource.NewMilliQuantity(scaling.ManualLimits.CPUMillicores, resource.DecimalSI)
+		agentLimits[corev1.ResourceMemory] =
+			*resource.NewQuantity(scaling.ManualLimits.MemoryBytes, resource.BinarySI)
+	}
 	runAsUser := int64(10001)
 	runAsGroup := int64(10001)
 	nonRoot := true
@@ -699,18 +708,11 @@ func agentTolerations() []corev1.Toleration {
 }
 
 func tierAgentResources(tier bosunv1alpha1.SessionTier) (corev1.ResourceList, corev1.ResourceList) {
-	if tier == bosunv1alpha1.SessionTierMedium {
-		return corev1.ResourceList{
-				corev1.ResourceCPU: resource.MustParse("490m"), corev1.ResourceMemory: resource.MustParse("1008Mi"),
-			}, corev1.ResourceList{
-				corev1.ResourceCPU: resource.MustParse("950m"), corev1.ResourceMemory: resource.MustParse("1984Mi"),
-			}
+	requests, limits, err := resourcepolicy.ResourceRequirements(tier)
+	if err != nil {
+		panic(err)
 	}
-	return corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("240m"), corev1.ResourceMemory: resource.MustParse("496Mi"),
-		}, corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("450m"), corev1.ResourceMemory: resource.MustParse("960Mi"),
-		}
+	return requests, limits
 }
 
 func restrictedContainerSecurityContext(noPrivilege, readOnly *bool) *corev1.SecurityContext {
@@ -850,6 +852,22 @@ func validateAgentSession(session *bosunv1alpha1.AgentSession) error {
 		session.Spec.StoragePolicy != bosunv1alpha1.StoragePolicyLocal ||
 		!supportedPriorityClass(session.Spec.PriorityClassName) {
 		return fmt.Errorf("session must use a supported Bosun priority class")
+	}
+	scaling := session.Spec.EffectiveResourceScaling()
+	switch scaling.Mode {
+	case bosunv1alpha1.ResourceScalingModeAuto:
+		if scaling.ManualLimits != nil {
+			return fmt.Errorf("spec.resourceScaling.manualLimits must be empty in Auto mode")
+		}
+	case bosunv1alpha1.ResourceScalingModeManual:
+		if scaling.ManualLimits == nil {
+			return fmt.Errorf("spec.resourceScaling.manualLimits is required in Manual mode")
+		}
+		if err := resourcepolicy.ValidateManualLimits(session.Spec.Tier, *scaling.ManualLimits); err != nil {
+			return fmt.Errorf("invalid manual resource limits: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported resource scaling mode %q", scaling.Mode)
 	}
 	return nil
 }

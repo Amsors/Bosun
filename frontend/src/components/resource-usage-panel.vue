@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { ApiError } from '../api/client'
 import type { SessionResourceSnapshot } from '../api/contracts'
 import { monitorApi } from '../api/monitor'
 import { formatCPU, formatMemory } from '../utils/resources'
+import { loadResourceRefreshInterval, saveResourceRefreshInterval } from '../utils/resource-refresh'
 import ResourceChart from './resource-chart.vue'
+import ResourceRefreshControl from './resource-refresh-control.vue'
 
 const props = defineProps<{
   sessionId: string
@@ -22,8 +24,10 @@ const snapshot = ref<SessionResourceSnapshot | null>(null)
 const samples = ref<Sample[]>([])
 const error = ref('')
 const loading = ref(true)
+const refreshIntervalMs = ref(loadResourceRefreshInterval())
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 let requestActive = false
+let mounted = false
 
 const cpuSamples = computed(() => samples.value.map((sample) => sample.cpu))
 const memorySamples = computed(() => samples.value.map((sample) => sample.memory))
@@ -69,11 +73,23 @@ async function fetchSnapshot(): Promise<void> {
   }
 }
 
+function startPolling(): void {
+  if (poller) globalThis.clearInterval(poller)
+  poller = globalThis.setInterval(fetchSnapshot, refreshIntervalMs.value)
+}
+
+watch(refreshIntervalMs, (intervalMs) => {
+  saveResourceRefreshInterval(intervalMs)
+  if (mounted) startPolling()
+})
+
 onMounted(async () => {
+  mounted = true
   await fetchSnapshot()
-  poller = globalThis.setInterval(fetchSnapshot, 5000)
+  if (mounted) startPolling()
 })
 onUnmounted(() => {
+  mounted = false
   if (poller) globalThis.clearInterval(poller)
 })
 </script>
@@ -85,9 +101,12 @@ onUnmounted(() => {
         <p class="eyebrow">LIVE RESOURCES</p>
         <h2>会话资源用量</h2>
       </div>
-      <span v-if="snapshot" class="sample-time">
-        更新于 {{ new Date(snapshot.observedAt).toLocaleTimeString('zh-CN') }}
-      </span>
+      <div class="resource-panel-meta">
+        <span v-if="snapshot" class="sample-time">
+          更新于 {{ new Date(snapshot.observedAt).toLocaleTimeString('zh-CN') }}
+        </span>
+        <ResourceRefreshControl v-model="refreshIntervalMs" />
+      </div>
     </div>
     <p v-if="loading && !snapshot">正在读取 metrics-server 数据…</p>
     <p v-else-if="error && !snapshot" class="alert" role="alert">{{ error }}</p>
@@ -113,6 +132,7 @@ onUnmounted(() => {
           :limit="snapshot.pod.limits.cpuMillicores"
           :samples="cpuSamples"
           :formatter="formatCPU"
+          :refresh-interval-ms="refreshIntervalMs"
         />
         <ResourceChart
           title="内存"
@@ -121,6 +141,7 @@ onUnmounted(() => {
           :limit="snapshot.pod.limits.memoryBytes"
           :samples="memorySamples"
           :formatter="formatMemory"
+          :refresh-interval-ms="refreshIntervalMs"
         />
       </div>
       <p v-if="error" class="metrics-note" role="status">{{ error }} 将继续自动重试。</p>

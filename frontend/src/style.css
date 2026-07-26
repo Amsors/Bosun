@@ -543,6 +543,11 @@ legend {
 .resource-panel-heading {
   margin-bottom: 1rem;
 }
+.resource-panel-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.45rem;
+}
 .resource-panel-heading h2,
 .section-heading h2 {
   margin: 0;
@@ -655,6 +660,21 @@ legend {
   justify-content: flex-end;
   color: #3e6b1f;
   font-size: 0.8rem;
+}
+.refresh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.refresh-control select {
+  padding: 0.35rem 1.7rem 0.35rem 0.55rem;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--panel);
 }
 .refresh-indicator small {
   width: 100%;
@@ -926,6 +946,9 @@ legend {
   .pods-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .resource-panel-meta {
+    justify-items: start;
   }
   .admin-summary {
     grid-template-columns: repeat(2, 1fr);

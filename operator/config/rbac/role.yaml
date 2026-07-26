@@ -45,6 +45,12 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - ""
+  resources:
+  - pods/resize
+  verbs:
+  - update
+- apiGroups:
   - bosun.io
   resources:
   - agentsessions
@@ -69,6 +75,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - metrics.k8s.io
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
 - apiGroups:
   - networking.k8s.io
   resources:

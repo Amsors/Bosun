@@ -19,3 +19,5 @@ spec:
   idleTimeoutSeconds: 1800
   activeDeadlineSeconds: 28800
   priorityClassName: bosun-normal
+  resourceScaling:
+    mode: Auto

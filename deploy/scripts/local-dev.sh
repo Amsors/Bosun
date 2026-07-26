@@ -380,12 +380,49 @@ run_smoke() (
   printf '%s\n' "${smoke_a_output}"
   BOSUN_BASE_URL=http://127.0.0.1:18080 \
     BOSUN_E2E_ACCESS_TOKEN="$(jq -r '.accessToken' <<<"${smoke_a_output}")" \
-    "${root}/e2e/smoke-b.sh"
+      "${root}/e2e/smoke-b.sh"
+)
+
+run_resource_autoscaling() (
+  : "${BOSUN_E2E_PASSWORD:?must set BOSUN_E2E_PASSWORD}"
+  require_commands curl jq uuidgen sha256sum
+  ensure_local_context
+
+  local forward_log
+  local smoke_a_output
+  forward_log="$(mktemp)"
+  kubectl --namespace "${platform_namespace}" port-forward service/bosun-frontend 18080:8080 \
+    >"${forward_log}" 2>&1 &
+  local forward_pid=$!
+  trap 'kill "${forward_pid}" >/dev/null 2>&1 || true; rm -f "${forward_log}"' EXIT
+
+  local _
+  for _ in {1..30}; do
+    if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
+      break
+    fi
+    if ! kill -0 "${forward_pid}" 2>/dev/null; then
+      cat "${forward_log}" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null
+
+  smoke_a_output="$(
+    BOSUN_BASE_URL=http://127.0.0.1:18080 \
+      BOSUN_E2E_PASSWORD="${BOSUN_E2E_PASSWORD}" \
+      "${root}/e2e/smoke-a.sh"
+  )"
+  printf '%s\n' "${smoke_a_output}"
+  BOSUN_BASE_URL=http://127.0.0.1:18080 \
+    BOSUN_E2E_ACCESS_TOKEN="$(jq -r '.accessToken' <<<"${smoke_a_output}")" \
+    "${root}/e2e/resource-autoscaling.sh"
 )
 
 usage() {
   cat <<'EOF'
-usage: local-dev.sh <up|build|deploy|forward|smoke|reset|down> [component]
+usage: local-dev.sh <up|build|deploy|forward|smoke|autoscaling|reset|down> [component]
 
 components: api, gateway, operator, frontend, agent, egress-proxy, all
 EOF
@@ -431,6 +468,9 @@ main() {
       ;;
     smoke)
       run_smoke
+      ;;
+    autoscaling)
+      run_resource_autoscaling
       ;;
     reset)
       provider_config

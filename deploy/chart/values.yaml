@@ -13,6 +13,12 @@ agent:
   idleScanInterval: 30s
   imagePullPolicy: IfNotPresent
 
+resourceAutoscaling:
+  enabled: true
+  sampleInterval: 15s
+  scaleUpCooldown: 60s
+  scaleDownCooldown: 5m
+
 api:
   terminal:
     writeQueueCapacity: 64
