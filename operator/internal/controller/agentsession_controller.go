@@ -48,6 +48,9 @@ const (
 	normalPriorityClass    = "bosun-normal"
 	highPriorityClass      = "bosun-high"
 	deadlineExceededReason = "DeadlineExceeded"
+	agentWorkingReason     = "AgentWorking"
+	awaitingApprovalReason = "AwaitingApproval"
+	awaitingChoiceReason   = "AwaitingChoice"
 	awaitingInputReason    = "AwaitingInput"
 	maxTransientRetries    = 10
 	defaultIdleScan        = 30 * time.Second
@@ -292,11 +295,11 @@ func (r *AgentSessionReconciler) reconcileRunning(
 func agentWorkCondition(state AgentWorkState) (string, string) {
 	switch state {
 	case AgentWorkStateWorking:
-		return "AgentWorking", "Claude is working; no user action is currently required"
+		return agentWorkingReason, "Claude is working; no user action is currently required"
 	case AgentWorkStateAwaitingApproval:
-		return "AwaitingApproval", "Claude is waiting for the user to approve an action"
+		return awaitingApprovalReason, "Claude is waiting for the user to approve an action"
 	case AgentWorkStateAwaitingChoice:
-		return "AwaitingChoice", "Claude is waiting for the user to choose the next step"
+		return awaitingChoiceReason, "Claude is waiting for the user to choose the next step"
 	case AgentWorkStateAwaitingInput:
 		return awaitingInputReason, "Claude has finished the current turn and is waiting for user input"
 	case AgentWorkStateStopped:

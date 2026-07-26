@@ -512,7 +512,7 @@ func workStateAllowsScaleDown(session *bosunv1alpha1.AgentSession) bool {
 			continue
 		}
 		switch condition.Reason {
-		case "AgentWorking", "AwaitingApproval", "AwaitingChoice":
+		case agentWorkingReason, awaitingApprovalReason, awaitingChoiceReason:
 			return false
 		default:
 			return true
