@@ -357,7 +357,7 @@ func TestResourceAutoscalerRequiresSafeWorkStateForScaleDown(t *testing.T) {
 		Client: k8s, Resizer: resizer, Metrics: metrics,
 		Now: func() time.Time { return now },
 	}
-	for range 8 {
+	for range 3 {
 		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
 			t.Fatal(err)
 		}
@@ -372,12 +372,12 @@ func TestResourceAutoscalerRequiresSafeWorkStateForScaleDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassCPULow ||
-		current.Status.ResourceScaling.RecommendedCPUMillicores != 350 {
+		current.Status.ResourceScaling.RecommendedCPUMillicores != 250 {
 		t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
 	}
 }
 
-func TestResourceAutoscalerScalesDownAfterEightLowSamplesWhileAwaitingInput(t *testing.T) {
+func TestResourceAutoscalerScalesDownAfterThreeLowSamplesWhileAwaitingInput(t *testing.T) {
 	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
 	session, _, k8s := autoScalingFixture(t)
 	resizer := &fakePodResizer{}
@@ -385,7 +385,7 @@ func TestResourceAutoscalerScalesDownAfterEightLowSamplesWhileAwaitingInput(t *t
 		Client: k8s, Resizer: resizer, Metrics: lowMetrics(now),
 		Now: func() time.Time { return now },
 	}
-	for range 8 {
+	for range 3 {
 		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
 			t.Fatal(err)
 		}
@@ -394,8 +394,30 @@ func TestResourceAutoscalerScalesDownAfterEightLowSamplesWhileAwaitingInput(t *t
 		t.Fatalf("resize calls = %d, want 1", resizer.calls)
 	}
 	agent := findPodContainer(resizer.pod, agentContainerName)
-	if agent.Resources.Limits.Cpu().MilliValue() != 350 {
-		t.Fatalf("CPU limit = %s, want 350m", agent.Resources.Limits.Cpu())
+	if agent.Resources.Limits.Cpu().MilliValue() != 250 {
+		t.Fatalf("CPU limit = %s, want 250m", agent.Resources.Limits.Cpu())
+	}
+}
+
+func TestResourceAutoscalerScalesDownGenericRunningSession(t *testing.T) {
+	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
+	session, _, k8s := autoScalingFixture(t)
+	session.Status.Conditions[0].Reason = "SessionRunning"
+	if err := k8s.Status().Update(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	resizer := &fakePodResizer{}
+	autoscaler := &ResourceAutoscaler{
+		Client: k8s, Resizer: resizer, Metrics: lowMetrics(now),
+		Now: func() time.Time { return now },
+	}
+	for range 3 {
+		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resizer.calls != 1 {
+		t.Fatalf("resize calls = %d, want 1", resizer.calls)
 	}
 }
 

@@ -56,15 +56,15 @@ func TestRecommendationScalesUpAfterTwoOfThreeHighSamples(t *testing.T) {
 	}
 }
 
-func TestRecommendationRequiresEightLowSamples(t *testing.T) {
+func TestRecommendationRequiresThreeLowSamples(t *testing.T) {
 	policy, _ := ForTier(bosunv1alpha1.SessionTierMedium)
-	class, target := Recommendation(cpuSamples(950, 100, 100, 100, 100, 100, 100, 100), 950, policy)
-	if class != bosunv1alpha1.ResourceLoadClassStable || target != 0 {
-		t.Fatalf("seven low samples = %s, %dm", class, target)
+	class, target := Recommendation(cpuSamples(950, 100, 100), 950, policy)
+	if class != bosunv1alpha1.ResourceLoadClassWarmingUp || target != 0 {
+		t.Fatalf("two low samples = %s, %dm", class, target)
 	}
-	class, target = Recommendation(cpuSamples(950, 100, 100, 100, 100, 100, 100, 100, 100), 950, policy)
-	if class != bosunv1alpha1.ResourceLoadClassCPULow || target != 750 {
-		t.Fatalf("eight low samples = %s, %dm, want CPULow 750m", class, target)
+	class, target = Recommendation(cpuSamples(950, 100, 100, 100), 950, policy)
+	if class != bosunv1alpha1.ResourceLoadClassCPULow || target != 500 {
+		t.Fatalf("three low samples = %s, %dm, want CPULow 500m", class, target)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestScaleTargetsRespectTierBoundsAndStep(t *testing.T) {
 	if got := ScaleDownTarget(300, small); got != 250 {
 		t.Fatalf("ScaleDownTarget() = %dm", got)
 	}
-	if got := ScaleDownTarget(450, small); got != 350 {
-		t.Fatalf("ScaleDownTarget() = %dm, want rounded 350m", got)
+	if got := ScaleDownTarget(450, small); got != 250 {
+		t.Fatalf("ScaleDownTarget() = %dm, want tier minimum 250m", got)
 	}
 }
 

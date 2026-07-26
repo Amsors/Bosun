@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import type { Session, SessionPhase } from '../api/contracts'
+import type { Session, SessionPhase, SessionResourceSnapshot } from '../api/contracts'
+import { monitorApi } from '../api/monitor'
 import AppShell from '../components/app-shell.vue'
+import SessionCPUStatus from '../components/session-cpu-status.vue'
 import StatusPanel from '../components/status-panel.vue'
 import { useAuthStore } from '../stores/auth-store'
 import { useSessionStore } from '../stores/session-store'
@@ -12,7 +14,20 @@ const sessions = useSessionStore()
 const error = ref('')
 const query = ref('')
 const phaseFilter = ref<'all' | 'working' | 'queued' | 'sleeping' | 'attention'>('all')
-let poller: ReturnType<typeof globalThis.setInterval> | null = null
+const cpuResources = ref<
+  Record<
+    string,
+    {
+      usageMillicores: number
+      limitMillicores: number
+      direction: 'up' | 'down' | null
+      changedAt: number
+    }
+  >
+>({})
+let sessionPoller: ReturnType<typeof globalThis.setInterval> | null = null
+let cpuPoller: ReturnType<typeof globalThis.setInterval> | null = null
+let cpuRequestActive = false
 
 const sleepingPhases: SessionPhase[] = ['Hibernating', 'Hibernated', 'Archived']
 const attentionReasons = ['AwaitingApproval', 'AwaitingChoice', 'AwaitingInput']
@@ -155,17 +170,79 @@ function relativeTime(raw?: string): string {
 
 async function load(silent = false): Promise<void> {
   try {
-    if (auth.accessToken) await sessions.load(auth.accessToken, 1, silent)
+    if (auth.accessToken) {
+      await sessions.load(auth.accessToken, 1, silent)
+      await loadCPUResources(auth.accessToken)
+    }
     error.value = ''
   } catch {
     error.value = '会话加载失败，请检查网络后重试。'
   }
 }
+
+function agentCPU(snapshot: SessionResourceSnapshot): {
+  usageMillicores: number
+  limitMillicores: number
+} | null {
+  const agent = snapshot.pod.containers.find((container) => container.name === 'agent')
+  if (!agent) return null
+  return {
+    usageMillicores: agent.usage?.cpuMillicores || 0,
+    limitMillicores: agent.limits.cpuMillicores,
+  }
+}
+
+async function loadCPUResources(token: string): Promise<void> {
+  if (cpuRequestActive) return
+  cpuRequestActive = true
+  try {
+    const running = sessions.items.filter((session) => session.phase === 'Running')
+    const results = await Promise.allSettled(
+      running.map(async (session) => ({
+        session,
+        resource: agentCPU(await monitorApi.session(token, session.id)),
+      })),
+    )
+    const next = { ...cpuResources.value }
+    const runningIDs = new Set(running.map((session) => session.id))
+    for (const sessionID of Object.keys(next)) {
+      if (!runningIDs.has(sessionID)) delete next[sessionID]
+    }
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !result.value.resource) continue
+      const { session, resource } = result.value
+      const previous = next[session.id]
+      const changed =
+        previous?.limitMillicores && previous.limitMillicores !== resource.limitMillicores
+      next[session.id] = {
+        ...resource,
+        direction: changed
+          ? resource.limitMillicores > previous.limitMillicores
+            ? 'up'
+            : 'down'
+          : previous?.direction || null,
+        changedAt: changed ? Date.now() : previous?.changedAt || 0,
+      }
+      if (next[session.id].changedAt && Date.now() - next[session.id].changedAt > 15_000) {
+        next[session.id].direction = null
+      }
+    }
+    cpuResources.value = next
+  } finally {
+    cpuRequestActive = false
+  }
+}
 onMounted(async () => {
   await load()
-  poller = globalThis.setInterval(() => void load(true), 5000)
+  sessionPoller = globalThis.setInterval(() => void load(true), 5000)
+  cpuPoller = globalThis.setInterval(() => {
+    if (auth.accessToken) void loadCPUResources(auth.accessToken)
+  }, 2000)
 })
-onUnmounted(() => poller && globalThis.clearInterval(poller))
+onUnmounted(() => {
+  if (sessionPoller) globalThis.clearInterval(sessionPoller)
+  if (cpuPoller) globalThis.clearInterval(cpuPoller)
+})
 </script>
 
 <template>
@@ -215,7 +292,7 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
           <span aria-hidden="true">⌕</span>
           <input v-model="query" type="search" placeholder="搜索会话名称或 ID" />
         </label>
-        <span>每 5 秒自动更新状态</span>
+        <span>会话状态每 5 秒更新 · CPU 每 2 秒更新</span>
       </div>
       <StatusPanel
         v-if="visibleSessions.length === 0"
@@ -246,9 +323,15 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
               sessionLabel(session)
             }}</span>
           </div>
+          <SessionCPUStatus
+            v-if="cpuResources[session.id]"
+            :usage-millicores="cpuResources[session.id].usageMillicores"
+            :limit-millicores="cpuResources[session.id].limitMillicores"
+            :direction="cpuResources[session.id].direction"
+          />
           <div class="session-card-meta">
             <span>{{
-              session.tier === 'medium' ? 'Medium · 500m / 1Gi' : 'Small · 250m / 512Mi'
+              session.tier === 'medium' ? 'Medium · 0.50 核 / 1 GiB' : 'Small · 0.25 核 / 512 MiB'
             }}</span>
             <span>{{ priorityLabel(session.priority) }}</span>
             <span>{{ relativeTime(session.lastActiveAt || session.createdAt) }}</span>

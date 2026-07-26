@@ -98,6 +98,8 @@ describe('ResourceUsagePanel', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('700m')
     expect(wrapper.text()).toContain('1.50 GiB')
+    expect(wrapper.text()).toContain('CPU 调度更新')
+    expect(wrapper.text()).toContain('CPU 分配已从 450m 调整为 700m')
     expect(getSessionResources).toHaveBeenCalledTimes(2)
 
     wrapper.unmount()

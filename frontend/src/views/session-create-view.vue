@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '../api/client'
@@ -11,7 +11,8 @@ import type { SessionPriority, SessionTier } from '../api/contracts'
 const auth = useAuthStore()
 const router = useRouter()
 const name = ref('')
-const tier = ref<SessionTier>('small')
+const memoryMiB = ref(2048)
+const tier = computed<SessionTier>(() => (memoryMiB.value <= 1024 ? 'small' : 'medium'))
 const priority = ref<SessionPriority>('normal')
 const busy = ref(false)
 const error = ref('')
@@ -94,18 +95,34 @@ async function create(): Promise<void> {
           >
           <p class="field-help">优先级只影响等待队列顺序，不会中断已经运行的其他会话。</p>
         </fieldset>
-        <fieldset>
-          <legend>资源档位</legend>
-          <label class="tier"
-            ><input v-model="tier" type="radio" value="small" /><span
-              ><strong>Small</strong><small>轻量脚本与日常项目 · 250m CPU / 512Mi</small></span
-            ></label
-          >
-          <label class="tier"
-            ><input v-model="tier" type="radio" value="medium" /><span
-              ><strong>Medium</strong><small>编译型项目 · 500m CPU / 1Gi</small></span
-            ></label
-          >
+        <fieldset class="resource-settings">
+          <legend>资源设置</legend>
+          <div class="resource-setting-row">
+            <div>
+              <strong>CPU</strong>
+              <small>初始分配约 1 核，运行后由平台根据负载自动调度</small>
+            </div>
+            <span class="resource-setting-value">自动调度</span>
+          </div>
+          <label class="resource-setting-row" for="session-memory">
+            <div>
+              <strong>内存</strong>
+              <small>内存创建后保持固定，不参与 CPU 自动调度</small>
+            </div>
+            <span class="resource-memory-input">
+              <input
+                id="session-memory"
+                v-model.number="memoryMiB"
+                type="number"
+                min="1024"
+                max="2048"
+                step="1024"
+                required
+              />
+              MiB
+            </span>
+          </label>
+          <p class="field-help">当前环境支持填写 1024 或 2048 MiB；默认 2048 MiB。</p>
         </fieldset>
         <p v-if="error" class="alert" role="alert">{{ error }}</p>
         <button class="primary" type="submit" :disabled="busy">

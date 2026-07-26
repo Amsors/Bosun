@@ -44,6 +44,16 @@ const visiblePods = computed(() => {
   })
 })
 const agentCount = computed(() => snapshot.value?.pods.filter((pod) => pod.isAgent).length || 0)
+const totalAgentCPULimit = computed(() =>
+  (snapshot.value?.pods || [])
+    .filter((pod) => pod.isAgent)
+    .reduce((total, pod) => total + (agentContainer(pod)?.limits.cpuMillicores || 0), 0),
+)
+const totalAgentCPUUsage = computed(() =>
+  (snapshot.value?.pods || [])
+    .filter((pod) => pod.isAgent)
+    .reduce((total, pod) => total + (agentContainer(pod)?.usage?.cpuMillicores || 0), 0),
+)
 
 async function load(): Promise<void> {
   if (requestActive) return
@@ -273,6 +283,11 @@ onUnmounted(() => {
         <div>
           <span>Agent Pods</span><strong>{{ agentCount }}</strong>
         </div>
+        <div class="cpu-limit-summary">
+          <span>Agent CPU 已分配</span>
+          <strong>{{ formatCPU(totalAgentCPULimit) }}</strong>
+          <small>当前使用 {{ formatCPU(totalAgentCPUUsage) }}</small>
+        </div>
         <div>
           <span>当前显示</span><strong>{{ visiblePods.length }}</strong>
         </div>
@@ -374,7 +389,7 @@ onUnmounted(() => {
                 </td>
                 <td>
                   <strong>{{ pod.usage ? formatCPU(pod.usage.cpuMillicores) : '—' }}</strong>
-                  <span
+                  <span class="pod-cpu-limit"
                     >/
                     {{
                       pod.limits.cpuMillicores ? formatCPU(pod.limits.cpuMillicores) : '未设置'
