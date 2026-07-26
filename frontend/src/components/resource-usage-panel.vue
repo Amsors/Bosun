@@ -26,7 +26,9 @@ const error = ref('')
 const loading = ref(true)
 const refreshIntervalMs = ref(loadResourceRefreshInterval())
 const lastRecordedMetricAt = ref('')
+const cpuLimitNotice = ref('')
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
+let cpuLimitNoticeTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 let requestActive = false
 let mounted = false
 
@@ -37,6 +39,20 @@ const agent = computed(() =>
 )
 
 function record(next: SessionResourceSnapshot): void {
+  const previousAgent = snapshot.value?.pod.containers.find(
+    (container) => container.name === 'agent',
+  )
+  const nextAgent = next.pod.containers.find((container) => container.name === 'agent')
+  const previousLimit = previousAgent?.limits.cpuMillicores || 0
+  const nextLimit = nextAgent?.limits.cpuMillicores || 0
+  if (previousLimit && nextLimit && previousLimit !== nextLimit) {
+    cpuLimitNotice.value = `CPU 分配已从 ${formatCPU(previousLimit)} 调整为 ${formatCPU(nextLimit)}`
+    if (cpuLimitNoticeTimer) globalThis.clearTimeout(cpuLimitNoticeTimer)
+    cpuLimitNoticeTimer = globalThis.setTimeout(() => {
+      cpuLimitNotice.value = ''
+      cpuLimitNoticeTimer = null
+    }, 8000)
+  }
   snapshot.value = next
   error.value = ''
   const metricObservedAt = next.pod.metricsObservedAt
@@ -98,11 +114,22 @@ onMounted(async () => {
 onUnmounted(() => {
   mounted = false
   if (poller) globalThis.clearInterval(poller)
+  if (cpuLimitNoticeTimer) globalThis.clearTimeout(cpuLimitNoticeTimer)
 })
 </script>
 
 <template>
   <section class="resource-panel card" aria-label="会话资源用量">
+    <Transition name="resource-notice">
+      <div v-if="cpuLimitNotice" class="cpu-allocation-notice" role="status">
+        <span class="live-dot" />
+        <div>
+          <strong>CPU 调度更新</strong>
+          <span>{{ cpuLimitNotice }}</span>
+        </div>
+        <button type="button" aria-label="关闭 CPU 调度提示" @click="cpuLimitNotice = ''">×</button>
+      </div>
+    </Transition>
     <div class="resource-panel-heading">
       <div>
         <p class="eyebrow">LIVE RESOURCES</p>

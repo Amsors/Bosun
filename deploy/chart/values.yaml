@@ -17,7 +17,7 @@ resourceAutoscaling:
   enabled: true
   sampleInterval: 3s
   scaleUpCooldown: 3s
-  scaleDownCooldown: 5m
+  scaleDownCooldown: 30s
 
 api:
   terminal:

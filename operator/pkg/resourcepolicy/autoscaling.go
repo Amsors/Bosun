@@ -13,9 +13,9 @@ const (
 	MetricsMaxAge      = 45 * time.Second
 	SampleCapacity     = 20
 	WarmupSamples      = 3
-	ScaleDownSamples   = 8
+	ScaleDownSamples   = 3
 	ScaleUpThreshold   = int64(75)
-	ScaleDownThreshold = int64(30)
+	ScaleDownThreshold = int64(35)
 )
 
 // ResourceSample is one valid Agent CPU observation.
@@ -128,9 +128,9 @@ func ScaleUpTarget(currentLimit int64, policy TierPolicy) int64 {
 	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)
 }
 
-// ScaleDownTarget applies the 0.75 maximum decrease ratio and tier hard minimum.
+// ScaleDownTarget halves idle CPU capacity while respecting the tier hard minimum.
 func ScaleDownTarget(currentLimit int64, policy TierPolicy) int64 {
-	target := (currentLimit*3 + 3) / 4
+	target := (currentLimit + 1) / 2
 	target = max(target, policy.MinCPULimit)
 	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)
 }
