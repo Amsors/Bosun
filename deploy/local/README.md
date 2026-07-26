@@ -27,7 +27,10 @@ export BOSUN_DEV_PROVIDER_AUTH_SCHEME=""
 make dev-up
 ```
 
-上方 `make dev-up` 命令初次执行需要拉取基础镜像，耗时会相对较长。
+上方 `make dev-up` 命令初次执行需要拉取基础镜像，耗时会相对较长。k3s
+系统组件和 PostgreSQL 等节点依赖会先缓存到宿主机 Docker，再以单平台归档导入
+所有 k3d 节点；后续 `make dev-reset` 会复用宿主机缓存，不再让每个新节点从公网
+重复拉取。固定 k3s 版本对应的依赖清单位于 `deploy/local/node-images.txt`。
 
 完成后执行 `make dev-forward`，再在浏览器访问 `http://localhost:18080`。
 
@@ -62,7 +65,7 @@ make dev-down
 | `make dev-forward` | 前台把 `http://127.0.0.1:18080` 转发到 frontend Service，转发因集群重建等原因退出时每 2 秒自动重试并打印重试次数，`Ctrl-C` 结束；frontend 容器继续经集群 Service 代理 `/api/`。 | 启动时集群须运行中。 |
 | `make dev-smoke` | 临时转发 frontend 并依次运行 smoke A/B（注册登录 → 创建 session → 等待 `Running` → 删除并校验 Pod、PVC、CR 清理），结束后自动收回转发。 | 需 `BOSUN_E2E_PASSWORD`，即 `BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke`。 |
 | `make dev-autoscaling` | 运行 CPU 自动扩缩容、Manual/Auto 切换和 metrics 不可用的串行演示链路；结束时恢复 metrics-server 并删除测试会话。 | 需先完成本地部署，并设置 `BOSUN_E2E_PASSWORD`。 |
-| `make dev-reset` | 删除并重建名为 `bosun` 的集群后重新部署，保留 Registry 镜像缓存。 | 需 provider 环境变量。用于集群状态脏了又想省去重新拉镜像。 |
+| `make dev-reset` | 先确保节点依赖已缓存到宿主机 Docker，再删除并重建名为 `bosun` 的集群、导入依赖并重新部署；保留 Registry 镜像缓存。 | 需 provider 环境变量。首次缓存失败时不会删除现有集群；用于集群状态脏了又想省去重新拉镜像。 |
 | `make dev-down` | 删除 `bosun` 集群与本地 Registry，回到干净状态。 | 破坏性，不需要 provider 环境变量。 |
 
 本地镜像 tag 默认取当前 commit 的七位 SHA，可用 `BOSUN_DEV_IMAGE_TAG`（须为七位小写十六进制）覆盖；Registry 端口可用 `BOSUN_DEV_REGISTRY_PORT`（默认 5001）调整。API key、JWT 私钥与数据库口令只写入临时目录和本地 k8s Secret。

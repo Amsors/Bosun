@@ -10,6 +10,8 @@ registry_port="${BOSUN_DEV_REGISTRY_PORT:-5001}"
 host_registry="127.0.0.1:${registry_port}/amsors"
 cluster_registry="${registry_container}:5000/amsors"
 platform_namespace="bosun-platform"
+node_dependency_image_file="${root}/deploy/local/node-images.txt"
+node_dependencies_imported=false
 
 require_commands() {
   local command
@@ -90,16 +92,174 @@ ensure_registry() {
   exit 1
 }
 
+node_dependency_images() {
+  {
+    sed \
+      --expression='/^[[:space:]]*#/d' \
+      --expression='/^[[:space:]]*$/d' \
+      "${node_dependency_image_file}"
+
+    # Chart 内不走本地 Bosun Registry 的镜像（目前为 PostgreSQL）同样需要
+    # 进入节点缓存。直接从渲染结果提取，避免镜像版本在脚本与 values 中漂移。
+    helm template bosun "${root}/deploy/chart" \
+      --namespace "${platform_namespace}" \
+      --values "${root}/deploy/local/values-local.yaml" \
+      --set-string "global.registry=${cluster_registry}" \
+      --set-string "global.imageTag=$(image_tag)" |
+      awk -v local_prefix="${cluster_registry}/" '
+        $1 == "image:" {
+          image = $2
+          gsub(/"/, "", image)
+          if (index(image, local_prefix) != 1) {
+            print image
+          }
+        }
+      '
+  } | sort --unique
+}
+
+ensure_host_node_dependency_images() {
+  local platform image import_image
+  local missing=()
+  local images=()
+  platform="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+  mapfile -t images < <(node_dependency_images)
+
+  for image in "${images[@]}"; do
+    if ! docker image inspect --platform "${platform}" "${image}" >/dev/null 2>&1; then
+      missing+=("${image}")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "all local node dependency images are cached in host Docker"
+    return
+  fi
+
+  echo "caching ${#missing[@]} missing node dependency image(s) in host Docker"
+  for image in "${missing[@]}"; do
+    echo "pulling node dependency image ${image}"
+    docker pull --platform "${platform}" "${image}"
+    if docker image inspect --platform "${platform}" "${image}" >/dev/null 2>&1; then
+      continue
+    fi
+
+    # Docker Desktop 的 containerd image store 对部分 Docker schema2 镜像
+    # 只保留远程 manifest，docker save 会漏掉 config/layers。用仅含 FROM 的
+    # Dockerfile 让 BuildKit 将当前平台完整写回本地 image store；不改变镜像
+    # 文件系统、Entrypoint 或 Cmd。
+    import_image="${image%@*}"
+    if [[ "${image}" == *@* ]]; then
+      echo "digest-pinned node dependency cannot be repacked for ${platform}: ${image}" >&2
+      exit 1
+    fi
+    echo "materializing incomplete host Docker cache for ${import_image}"
+    docker build \
+      --platform "${platform}" \
+      --build-arg "SOURCE_IMAGE=${image}" \
+      --file "${root}/deploy/local/cache-image.Dockerfile" \
+      --tag "${import_image}" \
+      "${root}/deploy/local"
+    if ! docker image inspect --platform "${platform}" "${image}" >/dev/null 2>&1; then
+      echo "node dependency image lacks platform ${platform} after materializing: ${image}" >&2
+      exit 1
+    fi
+  done
+}
+
+verify_node_dependency_images() {
+  local node image import_image node_image first_component
+  local nodes=()
+  local images=()
+  mapfile -t nodes < <(
+    k3d node list --no-headers |
+      awk -v cluster="${cluster_name}" '
+        $3 == cluster && ($2 == "server" || $2 == "agent") {
+          print $1
+        }
+      '
+  )
+  mapfile -t images < <(node_dependency_images)
+
+  if [[ ${#nodes[@]} -eq 0 ]]; then
+    echo "no server or agent nodes found in local '${cluster_name}' cluster" >&2
+    exit 1
+  fi
+
+  for node in "${nodes[@]}"; do
+    for image in "${images[@]}"; do
+      import_image="${image%@*}"
+      if [[ "${import_image}" != */* ]]; then
+        node_image="docker.io/library/${import_image}"
+      else
+        first_component="${import_image%%/*}"
+        if [[ "${first_component}" == *.* ||
+          "${first_component}" == *:* ||
+          "${first_component}" == "localhost" ]]; then
+          node_image="${import_image}"
+        else
+          node_image="docker.io/${import_image}"
+        fi
+      fi
+      if ! docker exec "${node}" \
+        ctr --address /run/k3s/containerd/containerd.sock \
+        --namespace k8s.io images check "name==${node_image}" |
+        awk 'NR > 1 && $4 == "complete" { found = 1 } END { exit !found }'; then
+        echo "node dependency image is incomplete on ${node}: ${node_image}" >&2
+        exit 1
+      fi
+    done
+  done
+}
+
+import_host_node_dependency_images() {
+  local platform image import_image archive_dir archive
+  local images=()
+  local import_images=()
+  platform="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+  mapfile -t images < <(node_dependency_images)
+
+  # k3d 不能把带 digest 的引用直接交给宿主机 runtime 导出；移除 digest 后
+  # 导入对应 tag，containerd 仍会保留镜像内容的 digest，满足 chart 的固定引用。
+  for image in "${images[@]}"; do
+    import_image="${image%@*}"
+    import_images+=("${import_image}")
+  done
+
+  archive_dir="$(mktemp -d)"
+  archive="${archive_dir}/node-dependencies.tar"
+
+  (
+    trap 'rm -rf "${archive_dir}"' EXIT
+    echo "exporting host Docker node dependencies for ${platform}"
+    # Docker Desktop 的 containerd image store 可能保存 multi-arch OCI index；
+    # k3d 直接按 tag 导入会遗漏 index 引用的 content。先导出单平台归档可避免
+    # k3d 输出成功、节点实际导入失败的假成功。
+    docker image save \
+      --platform "${platform}" \
+      --output "${archive}" \
+      "${import_images[@]}"
+    echo "importing host Docker node dependencies into all '${cluster_name}' nodes"
+    k3d image import "${archive}" --cluster "${cluster_name}"
+  )
+  verify_node_dependency_images
+  node_dependencies_imported=true
+}
+
 create_cluster() {
   ensure_registry
   # 仅复用健康集群；上次创建被打断会留下 created 状态容器却没有 context，
   # 这种残缺集群必须先删除再重建，否则跳过创建后 use-context 必然失败。
   if ! cluster_ready; then
+    # 先把依赖固定到宿主机 Docker 缓存。reset 时即使网络失败，也会在删除
+    # 现有集群前明确报错，不会留下一个无法启动的新集群。
+    ensure_host_node_dependency_images
     if cluster_present; then
       echo "removing incomplete '${cluster_name}' cluster before recreating" >&2
       k3d cluster delete "${cluster_name}"
     fi
     k3d cluster create --config "${root}/deploy/local/k3d.yaml"
+    import_host_node_dependency_images
   fi
   # 无论新建还是复用都刷新并切换 context，不依赖 create 时是否写入 kubeconfig。
   k3d kubeconfig merge "${cluster_name}" --kubeconfig-merge-default --kubeconfig-switch-context >/dev/null
@@ -287,6 +447,13 @@ ensure_images_present() {
 
 deploy_chart() {
   ensure_local_context
+  # 兼容升级本逻辑前已存在、但首次 Helm install 尚未成功的本地集群。
+  # 新建集群已在 create_cluster 中导入，不重复生成大体积归档。
+  if [[ "${node_dependencies_imported}" != true ]] &&
+    ! helm status bosun --namespace "${platform_namespace}" >/dev/null 2>&1; then
+    ensure_host_node_dependency_images
+    import_host_node_dependency_images
+  fi
   ensure_images_present
   ensure_platform_secrets
   # Helm installs files under crds/ only on the first release and deliberately
@@ -474,6 +641,9 @@ main() {
       ;;
     reset)
       provider_config
+      # 先完成宿主机持久缓存，再删除节点；首次下载失败时保留现有集群。
+      ensure_registry
+      ensure_host_node_dependency_images
       # 按集群名删除即可，不切 kubectl context：残缺集群 context 可能尚未写入。
       if cluster_present; then
         k3d cluster delete "${cluster_name}"
