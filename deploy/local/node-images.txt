@@ -1,0 +1,9 @@
+# rancher/k3s:v1.36.1-k3s1 随附组件使用的公网镜像。
+# 更新 deploy/local/k3d.yaml 中的 k3s 版本时，需要同步核对本文件。
+rancher/mirrored-coredns-coredns:1.14.3
+rancher/mirrored-metrics-server:v0.8.1
+rancher/local-path-provisioner:v0.0.36
+rancher/klipper-helm:v0.10.0-build20260513
+rancher/mirrored-library-traefik:3.6.13
+rancher/klipper-lb:v0.4.17
+rancher/mirrored-library-busybox:1.37.0
