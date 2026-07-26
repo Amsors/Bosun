@@ -40,6 +40,62 @@ scaling_predicate() {
     "${session_id}" "${expression}"
 }
 
+assert_memory_high() {
+  local stage="$1"
+  local snapshot
+  local request_bytes=""
+  local limit_bytes=""
+  local expected
+  local actual=""
+
+  for _ in {1..15}; do
+    snapshot="$(cluster_snapshot)"
+    if request_bytes="$(
+      jq -er --arg session_id "${session_id}" '
+        .data.pods[] |
+        select(.sessionID == $session_id) |
+        .containers[] |
+        select(.name == "agent") |
+        .requests.memoryBytes
+      ' <<<"${snapshot}"
+    )" && limit_bytes="$(
+      jq -er --arg session_id "${session_id}" '
+        .data.pods[] |
+        select(.sessionID == $session_id) |
+        .resourceScaling.actualResources.memoryBytes
+      ' <<<"${snapshot}"
+    )"; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ -z "${request_bytes}" || -z "${limit_bytes}" ]]; then
+    printf 'MemoryQoS %s check failed: agent actual resources are unavailable\n' "${stage}" >&2
+    return 1
+  fi
+
+  expected=$((request_bytes + ((limit_bytes - request_bytes) * 9 / 10)))
+  if ((expected > limit_bytes)); then
+    expected="${limit_bytes}"
+  fi
+
+  for _ in {1..15}; do
+    actual="$(
+      kubectl --namespace "${pod_namespace}" exec "${pod_name}" --container agent -- \
+        cat /sys/fs/cgroup/memory.high
+    )"
+    if [[ "${actual}" == "${expected}" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  printf '%s\n' \
+    "MemoryQoS ${stage} check failed: request=${request_bytes}, limit=${limit_bytes}, expected memory.high=${expected}, actual=${actual}" \
+    >&2
+  return 1
+}
+
 start_stress() {
   local duration="$1"
   kubectl --namespace "${pod_namespace}" exec "${pod_name}" --container agent -- \
@@ -87,6 +143,7 @@ sidecar_limits="$(
   kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
     jq -c '.spec.containers[] | select(.name == "auth-proxy") | .resources'
 )"
+assert_memory_high "initial"
 
 start_stress 90s
 scaled_up="$(
@@ -116,6 +173,7 @@ wait_json 24 5 \
   cluster_snapshot \
   "$(scaling_predicate '.resourceScaling.mode == "Manual" and .resourceScaling.actualResources.cpuMillicores == 650 and .resourceScaling.actualResources.memoryBytes == 1073741824')" \
   >/dev/null
+assert_memory_high "manual"
 
 start_stress 30s
 sleep 20
@@ -132,6 +190,7 @@ wait_json 24 5 \
   cluster_snapshot \
   "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.actualResources.memoryBytes == 1006632960 and (.resourceScaling.loadClass == "WarmingUp" or .resourceScaling.loadClass == "Stable")')" \
   >/dev/null
+assert_memory_high "restored-auto"
 
 before_metrics_outage="$(
   kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
@@ -171,4 +230,4 @@ session_id=""
 jq -cn \
   --arg pod "${pod_namespace}/${pod_name}" \
   --arg scaledCPU "${scaled_cpu}" \
-  '{pod:$pod,scaledCPU:$scaledCPU,result:"resource autoscaling demo passed"}'
+  '{pod:$pod,scaledCPU:$scaledCPU,memoryQoS:"verified",result:"resource autoscaling demo passed"}'
