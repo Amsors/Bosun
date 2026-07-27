@@ -41,8 +41,6 @@ type PodSnapshot struct {
 }
 
 type AgentResourceScalingSnapshot struct {
-	Mode                     string     `json:"mode"`
-	ManualLimits             *Resources `json:"manualLimits,omitempty"`
 	DesiredResources         Resources  `json:"desiredResources"`
 	ActualResources          *Resources `json:"actualResources"`
 	ActualResourcesAvailable bool       `json:"actualResourcesAvailable"`
@@ -51,10 +49,6 @@ type AgentResourceScalingSnapshot struct {
 	LastAppliedAt            *time.Time `json:"lastAppliedAt,omitempty"`
 	LastError                string     `json:"lastError,omitempty"`
 	WorkState                string     `json:"workState,omitempty"`
-	MinCPUMillicores         int64      `json:"minCPUMillicores"`
-	MaxCPUMillicores         int64      `json:"maxCPUMillicores"`
-	MinMemoryBytes           int64      `json:"minMemoryBytes"`
-	MaxMemoryBytes           int64      `json:"maxMemoryBytes"`
 }
 
 type PodResizeSnapshot struct {
@@ -85,17 +79,6 @@ type ClusterSnapshot struct {
 	NodeMetricsAvailable bool           `json:"nodeMetricsAvailable"`
 	Nodes                []NodeSnapshot `json:"nodes"`
 	Pods                 []PodSnapshot  `json:"pods"`
-}
-
-type ResizeRequest struct {
-	CPUMillicores int64 `json:"cpuMillicores"`
-	MemoryBytes   int64 `json:"memoryBytes"`
-}
-
-type ResourceScalingResponse struct {
-	ObservedAt time.Time `json:"observedAt"`
-	AgentResourceScalingSnapshot
-	Resize *PodResizeSnapshot `json:"resize"`
 }
 
 type AgentOwner struct {

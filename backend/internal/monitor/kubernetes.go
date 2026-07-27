@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
@@ -55,13 +54,6 @@ type Source interface {
 	GetNodePodCounters(context.Context, string) (map[string]PodCounterMetric, error)
 	GetAgentSession(context.Context, string, string) (*bosunv1alpha1.AgentSession, error)
 	ListAgentSessions(context.Context) ([]bosunv1alpha1.AgentSession, error)
-	UpdateResourceScaling(
-		context.Context,
-		string,
-		string,
-		string,
-		*bosunv1alpha1.ResourceScalingSpec,
-	) (*bosunv1alpha1.AgentSession, error)
 }
 
 type KubernetesSource struct {
@@ -122,37 +114,6 @@ func (s *KubernetesSource) ListAgentSessions(ctx context.Context) ([]bosunv1alph
 		return nil, err
 	}
 	return sessions.Items, nil
-}
-
-func (s *KubernetesSource) UpdateResourceScaling(
-	ctx context.Context,
-	namespace, name, expectedSessionID string,
-	scaling *bosunv1alpha1.ResourceScalingSpec,
-) (*bosunv1alpha1.AgentSession, error) {
-	var updated bosunv1alpha1.AgentSession
-	key := client.ObjectKey{Namespace: namespace, Name: name}
-	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		var current bosunv1alpha1.AgentSession
-		if err := s.objects.Get(ctx, key, &current); err != nil {
-			return err
-		}
-		if current.Spec.SessionID != expectedSessionID {
-			return apierrors.NewNotFound(
-				schema.GroupResource{Group: bosunv1alpha1.GroupVersion.Group, Resource: "agentsessions"},
-				name,
-			)
-		}
-		current.Spec.ResourceScaling = scaling.DeepCopy()
-		if err := s.objects.Update(ctx, &current); err != nil {
-			return err
-		}
-		updated = current
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &updated, nil
 }
 
 func (s *KubernetesSource) ListNodes(ctx context.Context) ([]corev1.Node, error) {

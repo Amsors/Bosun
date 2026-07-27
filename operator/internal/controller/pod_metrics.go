@@ -84,14 +84,14 @@ func (r *kubeletPodMetricsReader) GetAgentPodMetric(
 	pod *corev1.Pod,
 ) (AgentPodMetric, bool, error) {
 	if pod == nil || pod.Spec.NodeName == "" {
-		return AgentPodMetric{}, false, fmt.Errorf("Agent Pod has no assigned Node")
+		return AgentPodMetric{}, false, fmt.Errorf("agent Pod has no assigned Node")
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.client == nil {
-		return AgentPodMetric{}, false, fmt.Errorf("Kubelet metrics reader has no Kubernetes client")
+		return AgentPodMetric{}, false, fmt.Errorf("kubelet metrics reader has no Kubernetes client")
 	}
 	identity := agentMetricIdentity(pod)
 	r.seen[identity] = struct{}{}
@@ -112,7 +112,7 @@ func (r *kubeletPodMetricsReader) GetAgentPodMetric(
 	counter, ok := summary[pod.Namespace+"/"+pod.Name]
 	if !ok {
 		return AgentPodMetric{}, false, fmt.Errorf(
-			"Kubelet Summary has no agent container for Pod %s/%s",
+			"kubelet Summary has no agent container for Pod %s/%s",
 			pod.Namespace,
 			pod.Name,
 		)

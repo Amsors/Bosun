@@ -51,8 +51,8 @@ func TestRecommendationWarmsUpAndIgnoresSingleSpike(t *testing.T) {
 func TestRecommendationScalesUpAfterTwoOfThreeHighSamples(t *testing.T) {
 	policy := Policy()
 	class, target := Recommendation(cpuSamples(500, 400, 100, 400), 500, policy)
-	if class != bosunv1alpha1.ResourceLoadClassCPUHigh || target != 750 {
-		t.Fatalf("recommendation = %s, %dm, want CPUHigh 750m", class, target)
+	if class != bosunv1alpha1.ResourceLoadClassCPUHigh || target != 1000 {
+		t.Fatalf("recommendation = %s, %dm, want CPUHigh 1000m", class, target)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestRecommendationRequiresThreeLowSamples(t *testing.T) {
 	}
 }
 
-func TestScaleTargetsRespectSharedBoundsAndStep(t *testing.T) {
+func TestScaleTargetsRespectSharedBoundsAtMillicorePrecision(t *testing.T) {
 	policy := Policy()
 	if got := ScaleUpTarget(2500, policy); got != 3000 {
 		t.Fatalf("ScaleUpTarget() = %dm", got)
@@ -76,8 +76,28 @@ func TestScaleTargetsRespectSharedBoundsAndStep(t *testing.T) {
 	if got := ScaleDownTarget(700, policy); got != 500 {
 		t.Fatalf("ScaleDownTarget() = %dm", got)
 	}
+	if got := ScaleDownTarget(1501, policy); got != 750 {
+		t.Fatalf("ScaleDownTarget() = %dm, want 750m without step rounding", got)
+	}
 	if got := ScaleDownTarget(500, policy); got != 500 {
 		t.Fatalf("ScaleDownTarget() = %dm, want minimum 500m", got)
+	}
+}
+
+func TestScaleTargetsFollowRequiredSequences(t *testing.T) {
+	policy := Policy()
+	current := int64(500)
+	for index, want := range []int64{1000, 2000, 3000} {
+		current = ScaleUpTarget(current, policy)
+		if current != want {
+			t.Fatalf("scale-up step %d = %dm, want %dm", index, current, want)
+		}
+	}
+	for index, want := range []int64{1500, 750, 500} {
+		current = ScaleDownTarget(current, policy)
+		if current != want {
+			t.Fatalf("scale-down step %d = %dm, want %dm", index, current, want)
+		}
 	}
 }
 

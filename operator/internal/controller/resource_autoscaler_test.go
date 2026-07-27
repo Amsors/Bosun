@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -10,55 +9,20 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
-	"github.com/Amsors/Bosun/operator/pkg/resourcepolicy"
 	"github.com/Amsors/Bosun/operator/pkg/sessionidentity"
 )
+
+const testWorkerNodeName = "worker-1"
 
 type fakePodResizer struct {
 	pod   *corev1.Pod
 	calls int
 	err   error
-}
-
-type manualBeforeResizeClient struct {
-	client.Client
-}
-
-type fakePodMetricsReader struct {
-	metrics []AgentPodMetric
-	err     error
-	calls   int
-}
-
-type warmingPodMetricsReader struct{}
-
-func (f *fakePodMetricsReader) BeginCycle() {}
-
-func (*warmingPodMetricsReader) BeginCycle() {}
-
-func (c *manualBeforeResizeClient) Get(
-	ctx context.Context,
-	key client.ObjectKey,
-	object client.Object,
-	opts ...client.GetOption,
-) error {
-	if err := c.Client.Get(ctx, key, object, opts...); err != nil {
-		return err
-	}
-	if session, ok := object.(*bosunv1alpha1.AgentSession); ok {
-		session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-			Mode: bosunv1alpha1.ResourceScalingModeManual,
-			ManualLimits: &bosunv1alpha1.ResourceValues{
-				CPUMillicores: 700,
-				MemoryBytes:   3 * 1024 * 1024 * 1024,
-			},
-		}
-	}
-	return nil
 }
 
 func (f *fakePodResizer) UpdateResize(_ context.Context, pod *corev1.Pod) (*corev1.Pod, error) {
@@ -70,6 +34,14 @@ func (f *fakePodResizer) UpdateResize(_ context.Context, pod *corev1.Pod) (*core
 	return f.pod.DeepCopy(), nil
 }
 
+type fakePodMetricsReader struct {
+	metrics []AgentPodMetric
+	err     error
+	calls   int
+}
+
+func (*fakePodMetricsReader) BeginCycle() {}
+
 func (f *fakePodMetricsReader) GetAgentPodMetric(
 	_ context.Context,
 	_ *corev1.Pod,
@@ -78,221 +50,47 @@ func (f *fakePodMetricsReader) GetAgentPodMetric(
 	if f.err != nil {
 		return AgentPodMetric{}, false, f.err
 	}
-	index := f.calls - 1
-	if index >= len(f.metrics) {
-		index = len(f.metrics) - 1
+	if len(f.metrics) == 0 {
+		return AgentPodMetric{}, false, nil
 	}
+	index := min(f.calls-1, len(f.metrics)-1)
 	return f.metrics[index], true, nil
 }
 
-func (*warmingPodMetricsReader) GetAgentPodMetric(
-	context.Context,
-	*corev1.Pod,
-) (AgentPodMetric, bool, error) {
-	return AgentPodMetric{}, false, nil
-}
-
-func TestResourceAutoscalerAppliesManualLimitsWithoutChangingRequestsOrSidecar(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	session := resourceScalingSession()
-	session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-		Mode: bosunv1alpha1.ResourceScalingModeManual,
-		ManualLimits: &bosunv1alpha1.ResourceValues{
-			CPUMillicores: 700,
-			MemoryBytes:   3 * 1024 * 1024 * 1024,
-		},
-	}
-	session.Status.Phase = bosunv1alpha1.AgentSessionPhaseRunning
-	session.Status.Conditions = []metav1.Condition{{
-		Type: "Ready", Status: metav1.ConditionTrue, Reason: awaitingInputReason,
-	}}
-	pod := resourceScalingPod(session)
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(session).
-		WithObjects(session, pod).
-		Build()
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client: k8s, Resizer: resizer,
-		Now: func() time.Time { return time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC) },
-	}
-
-	if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-		t.Fatalf("reconcileSession() error = %v", err)
-	}
-	if resizer.calls != 1 {
-		t.Fatalf("resize calls = %d", resizer.calls)
-	}
-	agent := findPodContainer(resizer.pod, agentContainerName)
-	if agent.Resources.Limits.Cpu().MilliValue() != 700 ||
-		agent.Resources.Limits.Memory().Value() != 3*1024*1024*1024 {
-		t.Fatalf("agent limits = %#v", agent.Resources.Limits)
-	}
-	if agent.Resources.Requests.Cpu().MilliValue() != 500 {
-		t.Fatalf("agent requests changed = %#v", agent.Resources.Requests)
-	}
-	if findPodContainer(resizer.pod, "auth-proxy").Resources.Limits.Cpu().MilliValue() != 50 {
-		t.Fatal("auth-proxy resources changed")
-	}
-	var current bosunv1alpha1.AgentSession
-	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(session), &current); err != nil {
-		t.Fatal(err)
-	}
-	if current.Status.Phase != bosunv1alpha1.AgentSessionPhaseRunning ||
-		len(current.Status.Conditions) != 1 ||
-		current.Status.Conditions[0].Reason != awaitingInputReason {
-		t.Fatalf("existing status was not preserved = %#v", current.Status)
-	}
-}
-
-func TestResourceAutoscalerRestoresAutoMemoryAndPreservesDesiredCPU(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = bosunv1alpha1.AddToScheme(scheme)
-	session := resourceScalingSession()
-	session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-		Mode: bosunv1alpha1.ResourceScalingModeAuto,
-	}
-	pod := resourceScalingPod(session)
-	agent := findPodContainer(pod, agentContainerName)
-	agent.Resources.Limits[corev1.ResourceCPU] = resource.MustParse("800m")
-	agent.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("2Gi")
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(session).
-		WithObjects(session, pod).
-		Build()
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{Client: k8s, Resizer: resizer}
-
-	if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-		t.Fatalf("reconcileSession() error = %v", err)
-	}
-	updated := findPodContainer(resizer.pod, agentContainerName)
-	if updated.Resources.Limits.Cpu().MilliValue() != 800 {
-		t.Fatalf("CPU limit = %s, want 800m", updated.Resources.Limits.Cpu())
-	}
-	if updated.Resources.Limits.Memory().Value() != 3*1024*1024*1024 {
-		t.Fatalf("memory limit = %s, want 3Gi", updated.Resources.Limits.Memory())
-	}
-}
-
-func TestDesiredPodUsesPersistedManualLimits(t *testing.T) {
-	session := resourceScalingSession()
-	session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-		Mode: bosunv1alpha1.ResourceScalingModeManual,
-		ManualLimits: &bosunv1alpha1.ResourceValues{
-			CPUMillicores: 700,
-			MemoryBytes:   3 * 1024 * 1024 * 1024,
-		},
-	}
-	reconciler := &AgentSessionReconciler{}
-
-	pod := reconciler.desiredPod(session, "workspace")
-	agent := findPodContainer(pod, agentContainerName)
-	if agent.Resources.Limits.Cpu().MilliValue() != 700 ||
-		agent.Resources.Limits.Memory().Value() != 3*1024*1024*1024 {
-		t.Fatalf("agent limits = %#v", agent.Resources.Limits)
-	}
-}
-
-func TestResourceAutoscalerDoesNotApplyStaleAutoResultAfterManualSwitch(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = bosunv1alpha1.AddToScheme(scheme)
-	session := resourceScalingSession()
-	session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-		Mode: bosunv1alpha1.ResourceScalingModeAuto,
-	}
-	pod := resourceScalingPod(session)
-	findPodContainer(pod, agentContainerName).Resources.Limits[corev1.ResourceMemory] = resource.MustParse("2Gi")
-	base := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(session).
-		WithObjects(session, pod).
-		Build()
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client:  &manualBeforeResizeClient{Client: base},
-		Resizer: resizer,
-	}
-
-	if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-		t.Fatalf("reconcileSession() error = %v", err)
-	}
-	if resizer.calls != 0 {
-		t.Fatal("stale Auto result called pods/resize after mode switched to Manual")
-	}
-}
-
-func TestResourceAutoscalerScalesUpOnlyAgentCPULimit(t *testing.T) {
+func TestResourceAutoscalerDoublesCPUAndSynchronizesRequestAndLimit(t *testing.T) {
 	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, pod, k8s := autoScalingFixture(t)
-	metrics := &fakePodMetricsReader{metrics: []AgentPodMetric{
-		{Timestamp: now.Add(-30 * time.Second), CPUUsageMillicores: 400},
-		{Timestamp: now.Add(-15 * time.Second), CPUUsageMillicores: 100},
-		{Timestamp: now, CPUUsageMillicores: 400},
-	}}
+	session, k8s := autoScalingFixture(t, normalPriorityClass)
+	metrics := highMetrics(now)
 	resizer := &fakePodResizer{}
 	autoscaler := &ResourceAutoscaler{
 		Client: k8s, Resizer: resizer, Metrics: metrics,
 		Now: func() time.Time { return now },
 	}
-
 	for range 3 {
 		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatalf("reconcileSession() error = %v", err)
+			t.Fatal(err)
 		}
 	}
 	if resizer.calls != 1 {
 		t.Fatalf("resize calls = %d, want 1", resizer.calls)
 	}
 	agent := findPodContainer(resizer.pod, agentContainerName)
-	if agent.Resources.Limits.Cpu().MilliValue() != 750 {
-		t.Fatalf("CPU limit = %s, want 750m", agent.Resources.Limits.Cpu())
+	if agent.Resources.Limits.Cpu().MilliValue() != 1000 ||
+		agent.Resources.Requests.Cpu().MilliValue() != 1000 {
+		t.Fatalf("agent resources = %#v, want request=limit=1000m", agent.Resources)
 	}
-	if agent.Resources.Limits.Memory().Value() != 3*1024*1024*1024 ||
-		agent.Resources.Requests.Cpu().MilliValue() != 500 ||
-		agent.Resources.Requests.Memory().Value() != 2*1024*1024*1024 {
-		t.Fatalf("non-CPU Agent resources changed = %#v", agent.Resources)
+	if agent.Resources.Requests.Memory().Value() != 2*1024*1024*1024 ||
+		agent.Resources.Limits.Memory().Value() != 3*1024*1024*1024 {
+		t.Fatalf("agent memory changed = %#v", agent.Resources)
 	}
-	sidecar := findPodContainer(resizer.pod, "auth-proxy")
-	if sidecar.Resources.Limits.Cpu().MilliValue() != 50 {
+	if findPodContainer(resizer.pod, "auth-proxy").Resources.Limits.Cpu().MilliValue() != 50 {
 		t.Fatal("auth-proxy resources changed")
 	}
-	var current bosunv1alpha1.AgentSession
-	if err := k8s.Get(
-		context.Background(), client.ObjectKeyFromObject(session), &current,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if current.Status.ResourceScaling == nil ||
-		current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassCPUHigh ||
-		current.Status.ResourceScaling.RecommendedCPUMillicores != 750 {
-		t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
-	}
-	if len(autoscaler.window(session.UID).Samples()) != 0 {
-		t.Fatal("successful resize did not clear the CPU sample window")
-	}
-	_ = pod
 }
 
-func TestResourceAutoscalerDoesNotScaleWhilePodResizeIsActive(t *testing.T) {
+func TestLowPriorityNeverScalesAboveBase(t *testing.T) {
 	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, pod, k8s := autoScalingFixture(t)
-	pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
-		Type: corev1.PodResizeInProgress, Status: corev1.ConditionTrue,
-	})
-	if err := k8s.Status().Update(context.Background(), pod); err != nil {
-		t.Fatal(err)
-	}
+	session, k8s := autoScalingFixture(t, lowPriorityClass)
 	metrics := highMetrics(now)
 	resizer := &fakePodResizer{}
 	autoscaler := &ResourceAutoscaler{
@@ -305,309 +103,219 @@ func TestResourceAutoscalerDoesNotScaleWhilePodResizeIsActive(t *testing.T) {
 		}
 	}
 	if resizer.calls != 0 {
-		t.Fatal("active Pod resize did not suppress Auto resize")
+		t.Fatalf("low priority resize calls = %d, want 0", resizer.calls)
+	}
+	if metrics.calls != 0 {
+		t.Fatalf("low priority metric calls = %d, want 0", metrics.calls)
 	}
 }
 
-func TestResourceAutoscalerKeepsLimitWhenMetricsOrActualResourcesAreUnavailable(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name         string
-		removeActual bool
-		metrics      PodMetricsReader
-	}{
-		{
-			name:    "metrics unavailable",
-			metrics: &fakePodMetricsReader{err: errors.New("Kubelet Summary unavailable")},
+func TestPlanNodeFairlyFillsDemandCaps(t *testing.T) {
+	states := []*autoscaleSession{
+		{key: "a", priority: 2, current: 500, target: 500, demand: 700, scaleUp: true},
+		{key: "b", priority: 2, current: 500, target: 500, demand: 1300, scaleUp: true},
+	}
+	(&ResourceAutoscaler{}).planNode(states, 800)
+	if states[0].target != 700 || states[1].target != 1100 {
+		t.Fatalf("targets = %dm, %dm; want 700m, 1100m", states[0].target, states[1].target)
+	}
+}
+
+func TestPlanNodeReclaimsNormalCPUProportionallyForHighPriority(t *testing.T) {
+	states := []*autoscaleSession{
+		{key: "normal-a", priority: 2, current: 700, target: 700, demand: 700},
+		{key: "normal-b", priority: 2, current: 1300, target: 1300, demand: 1300},
+		{key: "high", priority: 3, current: 500, target: 500, demand: 1000, scaleUp: true},
+	}
+	(&ResourceAutoscaler{}).planNode(states, 0)
+	targets := map[string]int64{}
+	for _, state := range states {
+		targets[state.key] = state.target
+	}
+	if targets["normal-a"] != 600 || targets["normal-b"] != 900 || targets["high"] != 1000 {
+		t.Fatalf(
+			"targets = %dm, %dm, %dm; want 600m, 900m, 1000m",
+			targets["normal-a"], targets["normal-b"], targets["high"],
+		)
+	}
+}
+
+func TestPlanNodeFairlySharesHighPriorityCapacity(t *testing.T) {
+	states := []*autoscaleSession{
+		{key: "high-a", priority: 3, current: 500, target: 500, demand: 2000, scaleUp: true},
+		{key: "high-b", priority: 3, current: 500, target: 500, demand: 2000, scaleUp: true},
+		{key: "normal", priority: 2, current: 1000, target: 1000, demand: 1000},
+	}
+	(&ResourceAutoscaler{}).planNode(states, 100)
+	targets := map[string]int64{}
+	for _, state := range states {
+		targets[state.key] = state.target
+		if state.target < agentBaseCPUMillicores {
+			t.Fatalf("%s target = %dm, below base quota", state.key, state.target)
+		}
+	}
+	if targets["high-a"] != 800 || targets["high-b"] != 800 ||
+		targets["normal"] != 500 {
+		t.Fatalf("targets = %#v, want both high=800m and normal=500m", targets)
+	}
+}
+
+func TestNodeFreeCPUUsesAllocatableAndAllContainerLimits(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testWorkerNodeName}}
+	node.Status.Allocatable = corev1.ResourceList{
+		corev1.ResourceCPU: resource.MustParse("2"),
+	}
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod"},
+		Spec: corev1.PodSpec{
+			NodeName: testWorkerNodeName,
+			InitContainers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("25m"),
+				}},
+			}},
+			Containers: []corev1.Container{
+				{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("500m"),
+				}}},
+				{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("50m"),
+				}}},
+			},
 		},
-		{
-			name: "actual resources unavailable", removeActual: true,
-			metrics: highMetrics(now),
+	}
+	if got := nodeFreeCPU(node, []corev1.Pod{pod}); got != 1425 {
+		t.Fatalf("nodeFreeCPU() = %dm, want 1425m", got)
+	}
+}
+
+func TestPendingReservationUsesPriorityOrderAndStableNodeChoice(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	low := waitingSession("low", lowPriorityClass, time.Unix(1, 0))
+	high := waitingSession("high", highPriorityClass, time.Unix(2, 0))
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(low, high).Build()
+	nodes := []corev1.Node{
+		readyWorkerNode("worker-b", "2"),
+		readyWorkerNode("worker-a", "2"),
+	}
+	autoscaler := &ResourceAutoscaler{Client: k8s, Resizer: &fakePodResizer{}}
+	autoscaler.reserveWaitingSession(
+		context.Background(),
+		[]bosunv1alpha1.AgentSession{*low, *high},
+		nil,
+		nodes,
+		nil,
+	)
+
+	var currentHigh bosunv1alpha1.AgentSession
+	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(high), &currentHigh); err != nil {
+		t.Fatal(err)
+	}
+	if currentHigh.Annotations[schedulingNodeAnnotation] != "worker-a" {
+		t.Fatalf(
+			"high priority reservation = %q, want stable worker-a",
+			currentHigh.Annotations[schedulingNodeAnnotation],
+		)
+	}
+	var currentLow bosunv1alpha1.AgentSession
+	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(low), &currentLow); err != nil {
+		t.Fatal(err)
+	}
+	if currentLow.Annotations[schedulingNodeAnnotation] != "" {
+		t.Fatal("lower priority session was reserved before the high priority session")
+	}
+}
+
+func TestPendingReservationPreservesExistingBaseWhenCapacityIsInsufficient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	session := waitingSession("normal", normalPriorityClass, time.Unix(1, 0))
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(session).Build()
+	autoscaler := &ResourceAutoscaler{Client: k8s, Resizer: &fakePodResizer{}}
+	autoscaler.reserveWaitingSession(
+		context.Background(),
+		[]bosunv1alpha1.AgentSession{*session},
+		nil,
+		[]corev1.Node{readyWorkerNode("worker-a", "400m")},
+		nil,
+	)
+	var current bosunv1alpha1.AgentSession
+	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(session), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Annotations[schedulingNodeAnnotation] != "" {
+		t.Fatal("session received a reservation without a full 500m base allocation")
+	}
+}
+
+func TestPendingReservationIsExcludedFromAutoscalingFreeCPU(t *testing.T) {
+	session := waitingSession("reserved", normalPriorityClass, time.Unix(1, 0))
+	session.Annotations = map[string]string{schedulingNodeAnnotation: testWorkerNodeName}
+	reserved := pendingReservationCPU(
+		[]bosunv1alpha1.AgentSession{*session},
+		nil,
+	)
+	if reserved[testWorkerNodeName] != agentBaseCPUMillicores {
+		t.Fatalf(
+			"reserved CPU = %dm, want %dm",
+			reserved[testWorkerNodeName], agentBaseCPUMillicores,
+		)
+	}
+}
+
+func waitingSession(
+	name string,
+	priority string,
+	createdAt time.Time,
+) *bosunv1alpha1.AgentSession {
+	return &bosunv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "bosun-user", UID: types.UID(name),
+			CreationTimestamp: metav1.NewTime(createdAt),
+		},
+		Spec: bosunv1alpha1.AgentSessionSpec{
+			SessionID: name, DesiredState: bosunv1alpha1.DesiredStateRunning,
+			PriorityClassName: priority,
+		},
+		Status: bosunv1alpha1.AgentSessionStatus{
+			Phase: bosunv1alpha1.AgentSessionPhasePending,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			session, pod, k8s := autoScalingFixture(t)
-			if tt.removeActual {
-				pod.Status.ContainerStatuses = nil
-				if err := k8s.Status().Update(context.Background(), pod); err != nil {
-					t.Fatal(err)
-				}
-			}
-			resizer := &fakePodResizer{}
-			autoscaler := &ResourceAutoscaler{
-				Client: k8s, Resizer: resizer, Metrics: tt.metrics,
-				Now: func() time.Time { return now },
-			}
-			if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-				t.Fatal(err)
-			}
-			if resizer.calls != 0 {
-				t.Fatal("unavailable observation changed resources")
-			}
-			var current bosunv1alpha1.AgentSession
-			if err := k8s.Get(
-				context.Background(), client.ObjectKeyFromObject(session), &current,
-			); err != nil {
-				t.Fatal(err)
-			}
-			if current.Status.ResourceScaling == nil ||
-				current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassUnknown ||
-				current.Status.ResourceScaling.LastError == "" {
-				t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
-			}
-		})
+}
+
+func readyWorkerNode(name, cpu string) corev1.Node {
+	return corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Labels: map[string]string{
+				agentNodeRoleLabel: agentNodeRoleValue,
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse(cpu),
+			},
+			Conditions: []corev1.NodeCondition{{
+				Type: corev1.NodeReady, Status: corev1.ConditionTrue,
+			}},
+		},
 	}
 }
 
-func TestResourceAutoscalerWarmsUpWhileKubeletCounterBaselineIsPending(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, _, k8s := autoScalingFixture(t)
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client: k8s, Resizer: resizer, Metrics: &warmingPodMetricsReader{},
-		Now: func() time.Time { return now },
-	}
-
-	if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-		t.Fatal(err)
-	}
-	if resizer.calls != 0 {
-		t.Fatal("Kubelet baseline changed resources")
-	}
-	var current bosunv1alpha1.AgentSession
-	if err := k8s.Get(
-		context.Background(), client.ObjectKeyFromObject(session), &current,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if current.Status.ResourceScaling == nil ||
-		current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassWarmingUp ||
-		current.Status.ResourceScaling.LastError != "" {
-		t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
-	}
-}
-
-func TestResourceAutoscalerRequiresSafeWorkStateForScaleDown(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, pod, k8s := autoScalingFixture(t)
-	setFixtureCPU(t, k8s, pod, "1000m")
-	session.Status.Conditions[0].Reason = agentWorkingReason
-	if err := k8s.Status().Update(context.Background(), session); err != nil {
-		t.Fatal(err)
-	}
-	metrics := lowMetrics(now)
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client: k8s, Resizer: resizer, Metrics: metrics,
-		Now: func() time.Time { return now },
-	}
-	for range 3 {
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if resizer.calls != 0 {
-		t.Fatal("AgentWorking session was scaled down")
-	}
-	var current bosunv1alpha1.AgentSession
-	if err := k8s.Get(
-		context.Background(), client.ObjectKeyFromObject(session), &current,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassCPULow ||
-		current.Status.ResourceScaling.RecommendedCPUMillicores != 500 {
-		t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
-	}
-}
-
-func TestResourceAutoscalerScalesDownAfterThreeLowSamplesWhileAwaitingInput(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, pod, k8s := autoScalingFixture(t)
-	setFixtureCPU(t, k8s, pod, "1000m")
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client: k8s, Resizer: resizer, Metrics: lowMetrics(now),
-		Now: func() time.Time { return now },
-	}
-	for range 3 {
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if resizer.calls != 1 {
-		t.Fatalf("resize calls = %d, want 1", resizer.calls)
-	}
-	agent := findPodContainer(resizer.pod, agentContainerName)
-	if agent.Resources.Limits.Cpu().MilliValue() != 500 {
-		t.Fatalf("CPU limit = %s, want 500m", agent.Resources.Limits.Cpu())
-	}
-}
-
-func TestResourceAutoscalerScalesDownGenericRunningSession(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	session, pod, k8s := autoScalingFixture(t)
-	setFixtureCPU(t, k8s, pod, "1000m")
-	session.Status.Conditions[0].Reason = "SessionRunning"
-	if err := k8s.Status().Update(context.Background(), session); err != nil {
-		t.Fatal(err)
-	}
-	resizer := &fakePodResizer{}
-	autoscaler := &ResourceAutoscaler{
-		Client: k8s, Resizer: resizer, Metrics: lowMetrics(now),
-		Now: func() time.Time { return now },
-	}
-	for range 3 {
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if resizer.calls != 1 {
-		t.Fatalf("resize calls = %d, want 1", resizer.calls)
-	}
-}
-
-func TestResourceAutoscalerRejectsStaleMetricsAndRewarmsAfterPodUIDChange(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	t.Run("stale metrics", func(t *testing.T) {
-		session, _, k8s := autoScalingFixture(t)
-		resizer := &fakePodResizer{}
-		autoscaler := &ResourceAutoscaler{
-			Client: k8s, Resizer: resizer,
-			Metrics: &fakePodMetricsReader{metrics: []AgentPodMetric{{
-				Timestamp:          now.Add(-resourcepolicy.MetricsMaxAge - time.Second),
-				CPUUsageMillicores: 400,
-			}}},
-			Now: func() time.Time { return now },
-		}
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-		if resizer.calls != 0 {
-			t.Fatal("stale metrics changed resources")
-		}
-		var current bosunv1alpha1.AgentSession
-		if err := k8s.Get(
-			context.Background(), client.ObjectKeyFromObject(session), &current,
-		); err != nil {
-			t.Fatal(err)
-		}
-		if current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassUnknown {
-			t.Fatalf("load class = %s", current.Status.ResourceScaling.LoadClass)
-		}
-	})
-
-	t.Run("Pod UID change", func(t *testing.T) {
-		session, pod, k8s := autoScalingFixture(t)
-		metrics := &fakePodMetricsReader{metrics: []AgentPodMetric{
-			{Timestamp: now.Add(-20 * time.Second), CPUUsageMillicores: 400},
-			{Timestamp: now.Add(-10 * time.Second), CPUUsageMillicores: 400},
-			{Timestamp: now, CPUUsageMillicores: 400},
-		}}
-		resizer := &fakePodResizer{}
-		autoscaler := &ResourceAutoscaler{
-			Client: k8s, Resizer: resizer, Metrics: metrics,
-			Now: func() time.Time { return now },
-		}
-		for range 2 {
-			if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-				t.Fatal(err)
-			}
-		}
-		var replacement corev1.Pod
-		if err := k8s.Get(
-			context.Background(), client.ObjectKeyFromObject(pod), &replacement,
-		); err != nil {
-			t.Fatal(err)
-		}
-		replacement.UID = "replacement-pod-uid"
-		if err := k8s.Update(context.Background(), &replacement); err != nil {
-			t.Fatal(err)
-		}
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-		if resizer.calls != 0 {
-			t.Fatal("replacement Pod reused old samples")
-		}
-		var current bosunv1alpha1.AgentSession
-		if err := k8s.Get(
-			context.Background(), client.ObjectKeyFromObject(session), &current,
-		); err != nil {
-			t.Fatal(err)
-		}
-		if current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassWarmingUp {
-			t.Fatalf(
-				"load class = %s, want WarmingUp",
-				current.Status.ResourceScaling.LoadClass,
-			)
-		}
-	})
-}
-
-func TestResourceAutoscalerCooldownAndFailedIntentRetry(t *testing.T) {
-	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
-	t.Run("cooldown", func(t *testing.T) {
-		session, _, k8s := autoScalingFixture(t)
-		applied := metav1.NewTime(now.Add(-30 * time.Second))
-		session.Status.ResourceScaling = &bosunv1alpha1.ResourceScalingStatus{
-			LastAppliedAt: &applied,
-		}
-		if err := k8s.Status().Update(context.Background(), session); err != nil {
-			t.Fatal(err)
-		}
-		resizer := &fakePodResizer{}
-		autoscaler := &ResourceAutoscaler{
-			Client: k8s, Resizer: resizer, Metrics: highMetrics(now),
-			ScaleUpCooldown: time.Minute,
-			Now:             func() time.Time { return now },
-		}
-		for range 3 {
-			if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if resizer.calls != 0 {
-			t.Fatal("scale-up cooldown did not suppress resize")
-		}
-	})
-
-	t.Run("failed intent retry", func(t *testing.T) {
-		session, _, k8s := autoScalingFixture(t)
-		resizer := &fakePodResizer{err: errors.New("resize rejected")}
-		metrics := highMetrics(now)
-		autoscaler := &ResourceAutoscaler{
-			Client: k8s, Resizer: resizer, Metrics: metrics,
-			Now: func() time.Time { return now },
-		}
-		for i := range 3 {
-			err := autoscaler.reconcileSession(context.Background(), session)
-			if i < 2 && err != nil {
-				t.Fatal(err)
-			}
-			if i == 2 && err == nil {
-				t.Fatal("failed resize did not return an error")
-			}
-		}
-		if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
-			t.Fatalf("suppressed retry returned error = %v", err)
-		}
-		if resizer.calls != 1 {
-			t.Fatalf("resize calls = %d, want one failed attempt", resizer.calls)
-		}
-	})
-}
-
-func resourceScalingSession() *bosunv1alpha1.AgentSession {
+func resourceScalingSession(priority string) *bosunv1alpha1.AgentSession {
 	return &bosunv1alpha1.AgentSession{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "agent-018f9c6e-1234-7000-8000-abcdef012501", Namespace: "bosun-user",
 			UID: "session-uid", Generation: 1,
 		},
 		Spec: bosunv1alpha1.AgentSessionSpec{
-			SessionID:    "018f9c6e-1234-7000-8000-abcdef012501",
-			DesiredState: bosunv1alpha1.DesiredStateRunning,
+			SessionID:         "018f9c6e-1234-7000-8000-abcdef012501",
+			DesiredState:      bosunv1alpha1.DesiredStateRunning,
+			PriorityClassName: priority,
 		},
 		Status: bosunv1alpha1.AgentSessionStatus{
 			Phase: bosunv1alpha1.AgentSessionPhaseRunning,
@@ -623,17 +331,20 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sessionidentity.PodName(session.Spec.SessionID), Namespace: session.Namespace,
-			UID: "pod-uid",
+			UID:    "pod-uid",
+			Labels: map[string]string{sessionLabel: session.Spec.SessionID},
 		},
-		Spec: corev1.PodSpec{NodeName: "worker-1", Containers: []corev1.Container{
+		Spec: corev1.PodSpec{NodeName: testWorkerNodeName, Containers: []corev1.Container{
 			{
 				Name: agentContainerName,
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("2Gi"),
+						corev1.ResourceCPU:    resource.MustParse("500m"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 					Limits: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("3Gi"),
+						corev1.ResourceCPU:    resource.MustParse("500m"),
+						corev1.ResourceMemory: resource.MustParse("3Gi"),
 					},
 				},
 			},
@@ -641,7 +352,8 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 				Name: "auth-proxy",
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi"),
+						corev1.ResourceCPU:    resource.MustParse("50m"),
+						corev1.ResourceMemory: resource.MustParse("64Mi"),
 					},
 				},
 			},
@@ -652,10 +364,12 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 				Name: agentContainerName,
 				Resources: &corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("2Gi"),
+						corev1.ResourceCPU:    resource.MustParse("500m"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 					Limits: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("3Gi"),
+						corev1.ResourceCPU:    resource.MustParse("500m"),
+						corev1.ResourceMemory: resource.MustParse("3Gi"),
 					},
 				},
 			}},
@@ -665,7 +379,8 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 
 func autoScalingFixture(
 	t *testing.T,
-) (*bosunv1alpha1.AgentSession, *corev1.Pod, client.Client) {
+	priority string,
+) (*bosunv1alpha1.AgentSession, client.Client) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
@@ -674,33 +389,14 @@ func autoScalingFixture(
 	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	session := resourceScalingSession()
-	session.Spec.ResourceScaling = &bosunv1alpha1.ResourceScalingSpec{
-		Mode: bosunv1alpha1.ResourceScalingModeAuto,
-	}
+	session := resourceScalingSession(priority)
 	pod := resourceScalingPod(session)
 	k8s := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(session, pod).
 		WithObjects(session, pod).
 		Build()
-	return session, pod, k8s
-}
-
-func setFixtureCPU(t *testing.T, k8s client.Client, pod *corev1.Pod, cpu string) {
-	t.Helper()
-	var current corev1.Pod
-	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(pod), &current); err != nil {
-		t.Fatal(err)
-	}
-	current.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU] = resource.MustParse(cpu)
-	if err := k8s.Update(context.Background(), &current); err != nil {
-		t.Fatal(err)
-	}
-	current.Status.ContainerStatuses[0].Resources.Limits[corev1.ResourceCPU] = resource.MustParse(cpu)
-	if err := k8s.Status().Update(context.Background(), &current); err != nil {
-		t.Fatal(err)
-	}
+	return session, k8s
 }
 
 func highMetrics(now time.Time) *fakePodMetricsReader {
@@ -709,15 +405,4 @@ func highMetrics(now time.Time) *fakePodMetricsReader {
 		{Timestamp: now.Add(-15 * time.Second), CPUUsageMillicores: 100},
 		{Timestamp: now, CPUUsageMillicores: 400},
 	}}
-}
-
-func lowMetrics(now time.Time) *fakePodMetricsReader {
-	metrics := make([]AgentPodMetric, 8)
-	for i := range metrics {
-		metrics[i] = AgentPodMetric{
-			Timestamp:          now.Add(time.Duration(i-7) * 5 * time.Second),
-			CPUUsageMillicores: 100,
-		}
-	}
-	return &fakePodMetricsReader{metrics: metrics}
 }

@@ -188,7 +188,7 @@ func kubeletMetricTestPod(name, uid string) *corev1.Pod {
 			Name:      name,
 			UID:       types.UID(uid),
 		},
-		Spec: corev1.PodSpec{NodeName: "worker-1"},
+		Spec: corev1.PodSpec{NodeName: testWorkerNodeName},
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        agentContainerName,
 			ContainerID: "containerd://" + uid,

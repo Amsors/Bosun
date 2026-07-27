@@ -33,6 +33,39 @@ func TestAgentSessionReconcileCreatesSecureUnifiedWorkloadAndIsIdempotent(t *tes
 	assertAgentSessionPodReconcileIsIdempotent(t, reconciler, session, &pod)
 }
 
+func TestAgentSessionWaitsForCapacityReservationBeforeCreatingPod(t *testing.T) {
+	session := createAgentSession(
+		t,
+		"018f9c6e-1234-7000-8000-abcdef012499",
+		"018f9c6e-1234-7000-8000-abcdef012599",
+	)
+	delete(session.Annotations, schedulingNodeAnnotation)
+	if err := testClient.Update(context.Background(), session); err != nil {
+		t.Fatalf("remove scheduling reservation: %v", err)
+	}
+	reconciler := newAgentSessionReconciler()
+	reconcileAgentSession(t, reconciler, session, 3)
+
+	var pod corev1.Pod
+	err := testClient.Get(
+		context.Background(),
+		namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)),
+		&pod,
+	)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("get unreserved Pod error = %v, want NotFound", err)
+	}
+	var current bosunv1alpha1.AgentSession
+	getObject(t, clientKey(session), &current)
+	if current.Status.Phase != bosunv1alpha1.AgentSessionPhasePending {
+		t.Fatalf("phase = %q, want Pending", current.Status.Phase)
+	}
+	condition := apimeta.FindStatusCondition(current.Status.Conditions, sessionReadyCondition)
+	if condition == nil || condition.Reason != "AwaitingCapacity" {
+		t.Fatalf("Ready condition = %#v, want AwaitingCapacity", condition)
+	}
+}
+
 func assertSessionPVC(t *testing.T, session *bosunv1alpha1.AgentSession) {
 	t.Helper()
 	var pvc corev1.PersistentVolumeClaim
@@ -115,11 +148,22 @@ func assertSecureSessionPod(
 		*pod.Spec.Tolerations[0].TolerationSeconds != 300 {
 		t.Fatalf("tolerations = %#v", pod.Spec.Tolerations)
 	}
+	assertReservedNodeAffinity(t, pod)
+}
+
+func assertReservedNodeAffinity(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
 	requiredAffinity := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
-	requirement := requiredAffinity.NodeSelectorTerms[0].MatchExpressions[0]
-	if requirement.Key != "role" || requirement.Operator != corev1.NodeSelectorOpIn ||
-		!reflect.DeepEqual(requirement.Values, []string{"worker"}) {
+	term := requiredAffinity.NodeSelectorTerms[0]
+	requirement := term.MatchExpressions[0]
+	if requirement.Key != agentNodeRoleLabel || requirement.Operator != corev1.NodeSelectorOpIn ||
+		!reflect.DeepEqual(requirement.Values, []string{agentNodeRoleValue}) {
 		t.Fatalf("required node affinity = %#v, want role in [worker]", requirement)
+	}
+	if len(term.MatchFields) != 1 ||
+		term.MatchFields[0].Key != "metadata.name" ||
+		!reflect.DeepEqual(term.MatchFields[0].Values, []string{testWorkerNodeName}) {
+		t.Fatalf("reserved Node affinity = %#v", term.MatchFields)
 	}
 }
 
@@ -465,8 +509,11 @@ func createAgentSession(t *testing.T, sessionID, userID string) *bosunv1alpha1.A
 	session := &bosunv1alpha1.AgentSession{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sessionidentity.CRName(sessionID), Namespace: namespace,
-			Labels:      map[string]string{managedByLabel: managedByValue, userLabel: userID, sessionLabel: sessionID},
-			Annotations: map[string]string{sessionidentity.LastActiveAnnotation: time.Now().UTC().Format(time.RFC3339)},
+			Labels: map[string]string{managedByLabel: managedByValue, userLabel: userID, sessionLabel: sessionID},
+			Annotations: map[string]string{
+				sessionidentity.LastActiveAnnotation: time.Now().UTC().Format(time.RFC3339),
+				schedulingNodeAnnotation:             testWorkerNodeName,
+			},
 		},
 		Spec: bosunv1alpha1.AgentSessionSpec{
 			SessionID: sessionID, UserID: userID,
@@ -490,7 +537,8 @@ func newAgentSessionReconciler() *AgentSessionReconciler {
 		AgentPullPolicy:  corev1.PullAlways,
 		StorageClassName: "local-path", GatewayURL: "http://bosun-gateway:8081",
 		EgressProxyURL: "http://bosun-egress-proxy:3128", IdleScanInterval: time.Millisecond,
-		Quiescer: &fakeAgentQuiescer{}, StateReader: &fakeAgentStateReader{},
+		CapacitySchedulingEnabled: true,
+		Quiescer:                  &fakeAgentQuiescer{}, StateReader: &fakeAgentStateReader{},
 	}
 }
 

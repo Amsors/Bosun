@@ -6,14 +6,10 @@ import { resourceRefreshIntervalStorageKey } from '../utils/resource-refresh'
 import AdminView from './admin-view.vue'
 
 const cluster = vi.hoisted(() => vi.fn())
-const resizeAgent = vi.hoisted(() => vi.fn())
-const restoreAuto = vi.hoisted(() => vi.fn())
 
 vi.mock('../api/monitor', () => ({
   monitorApi: {
     cluster,
-    resizeAgent,
-    restoreAuto,
   },
 }))
 
@@ -63,14 +59,9 @@ function snapshot(cpuLimit: number): ClusterResourceSnapshot {
         sessionName: '课程演示',
         username: 'student@example.com',
         resourceScaling: {
-          mode: 'Auto',
           desiredResources: { cpuMillicores: cpuLimit, memoryBytes: 960 * mebibyte },
           actualResources: { cpuMillicores: cpuLimit, memoryBytes: 960 * mebibyte },
           actualResourcesAvailable: true,
-          minCPUMillicores: 250,
-          maxCPUMillicores: 1500,
-          minMemoryBytes: 512 * mebibyte,
-          maxMemoryBytes: 3 * 1024 * mebibyte,
         },
       },
     ],
@@ -84,7 +75,7 @@ describe('AdminView', () => {
     globalThis.localStorage.clear()
   })
 
-  it('preserves an edited resize draft while cluster polling continues', async () => {
+  it('refreshes scheduler resource data while polling continues', async () => {
     vi.useFakeTimers()
     cluster.mockResolvedValueOnce(snapshot(450)).mockResolvedValueOnce(snapshot(500))
 
@@ -98,14 +89,12 @@ describe('AdminView', () => {
     })
     await flushPromises()
 
-    const cpuInput = wrapper.find<HTMLInputElement>('.resize-form input')
-    await cpuInput.trigger('focus')
-    await cpuInput.setValue('733')
+    expect(wrapper.text()).toContain('450m')
 
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
 
-    expect(wrapper.find<HTMLInputElement>('.resize-form input').element.value).toBe('733')
+    expect(wrapper.text()).toContain('500m')
     expect(cluster).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
@@ -138,44 +127,7 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
-  it('shows queued Manual intent and restores Auto mode', async () => {
-    const current = snapshot(450)
-    const scaling = current.pods[0]!.resourceScaling!
-    current.pods[0]!.resourceScaling = {
-      ...scaling,
-      mode: 'Manual',
-      manualLimits: { cpuMillicores: 700, memoryBytes: 1024 * 1024 * 1024 },
-    }
-    cluster.mockResolvedValue(current)
-    restoreAuto.mockResolvedValue({
-      observedAt: '2026-07-24T03:00:05Z',
-      ...scaling,
-      mode: 'Auto',
-      resize: null,
-    })
-
-    const wrapper = mount(AdminView, {
-      global: {
-        stubs: {
-          AppShell: { template: '<main><slot /></main>' },
-          StatusPanel: { template: '<div><slot /></div>' },
-        },
-      },
-    })
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('手动调整已排队')
-    const restore = wrapper.findAll('button').find((button) => button.text() === '恢复自动调度')
-    expect(restore).toBeTruthy()
-    await restore!.trigger('click')
-    await flushPromises()
-
-    expect(restoreAuto).toHaveBeenCalledWith('018f9c6e-1234-7000-8000-abcdef012501')
-    expect(wrapper.text()).toContain('自动调度')
-    wrapper.unmount()
-  })
-
-  it('shows the Auto CPU load class and recommendation without a memory recommendation', async () => {
+  it('shows the CPU load class and recommendation without a memory recommendation', async () => {
     const current = snapshot(450)
     current.pods[0]!.resourceScaling = {
       ...current.pods[0]!.resourceScaling!,

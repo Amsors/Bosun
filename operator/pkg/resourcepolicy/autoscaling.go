@@ -121,18 +121,14 @@ func Recommendation(
 	return bosunv1alpha1.ResourceLoadClassStable, 0
 }
 
-// ScaleUpTarget applies the 1.50 maximum increase ratio and hard maximum.
+// ScaleUpTarget doubles CPU capacity while respecting the hard maximum.
 func ScaleUpTarget(currentLimit int64, policy ResourcePolicy) int64 {
-	target := currentLimit * 3 / 2
-	target = min(target, policy.MaxCPULimit)
-	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)
+	return clamp(currentLimit*2, policy.MinCPULimit, policy.MaxCPULimit)
 }
 
 // ScaleDownTarget halves idle CPU capacity while respecting the hard minimum.
 func ScaleDownTarget(currentLimit int64, policy ResourcePolicy) int64 {
-	target := (currentLimit + 1) / 2
-	target = max(target, policy.MinCPULimit)
-	return clampAndRoundUp(target, policy.MinCPULimit, policy.MaxCPULimit)
+	return clamp(currentLimit/2, policy.MinCPULimit, policy.MaxCPULimit)
 }
 
 func utilizationAtLeast(sample ResourceSample, percentage int64) bool {
@@ -143,14 +139,10 @@ func utilizationBelow(sample ResourceSample, percentage int64) bool {
 	return sample.CPUUsage*100 < sample.ActualCPULimit*percentage
 }
 
-func clampAndRoundUp(value, minimum, maximum int64) int64 {
+func clamp(value, minimum, maximum int64) int64 {
 	if value < minimum {
-		value = minimum
+		return minimum
 	}
-	if value > maximum {
-		value = maximum
-	}
-	value = ((value + CPUStepMillicores - 1) / CPUStepMillicores) * CPUStepMillicores
 	if value > maximum {
 		return maximum
 	}

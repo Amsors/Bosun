@@ -2,16 +2,8 @@
 package resourcepolicy
 
 import (
-	"fmt"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-
-	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
-)
-
-const (
-	CPUStepMillicores = int64(50)
 )
 
 // ResourcePolicy contains immutable requests, defaults and hard limits.
@@ -51,23 +43,6 @@ func ResourceRequirements() (corev1.ResourceList, corev1.ResourceList) {
 			corev1.ResourceCPU:    *resource.NewMilliQuantity(policy.DefaultCPULimit, resource.DecimalSI),
 			corev1.ResourceMemory: *resource.NewQuantity(policy.DefaultMemoryLimitBytes, resource.BinarySI),
 		}
-}
-
-// ValidateManualLimits verifies the shared hard bounds used by both backend and Operator.
-func ValidateManualLimits(limits bosunv1alpha1.ResourceValues) error {
-	if limits.CPUMillicores < policy.MinCPULimit || limits.CPUMillicores > policy.MaxCPULimit {
-		return fmt.Errorf(
-			"CPU limit %dm is outside bounds [%dm, %dm]",
-			limits.CPUMillicores, policy.MinCPULimit, policy.MaxCPULimit,
-		)
-	}
-	if limits.MemoryBytes < policy.MinMemoryLimitBytes || limits.MemoryBytes > policy.MaxMemoryLimitBytes {
-		return fmt.Errorf(
-			"memory limit %d is outside bounds [%d, %d]",
-			limits.MemoryBytes, policy.MinMemoryLimitBytes, policy.MaxMemoryLimitBytes,
-		)
-	}
-	return nil
 }
 
 func mustBytes(raw string) int64 {

@@ -11,8 +11,8 @@ agent:
 
 resourceAutoscaling:
   sampleInterval: 2s
-  scaleUpCooldown: 5s
-  scaleDownCooldown: 5s
+  scaleUpCooldown: 3s
+  scaleDownCooldown: 3s
 
 auth:
   trustedProxyHeader: ""
