@@ -193,20 +193,38 @@ wait_json 24 5 \
 assert_memory_high "restored-auto"
 
 before_metrics_outage="$(
-  kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
-    jq -r '.spec.containers[] | select(.name == "agent") | .resources.limits.cpu'
+  cluster_snapshot |
+    jq -r --arg session_id "${session_id}" \
+      '.data.pods[] | select(.sessionID == $session_id) | .resourceScaling.desiredResources.cpuMillicores'
 )"
 metrics_replicas="$(
   kubectl --namespace kube-system get deployment/metrics-server \
     --output jsonpath='{.spec.replicas}'
 )"
 kubectl --namespace kube-system scale deployment/metrics-server --replicas=0 >/dev/null
-sleep 15
-after_metrics_outage="$(
-  kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
-    jq -r '.spec.containers[] | select(.name == "agent") | .resources.limits.cpu'
+for _ in {1..30}; do
+  if [[ -z "$(
+    kubectl --namespace kube-system get pods \
+      --selector k8s-app=metrics-server \
+      --output name
+  )" ]]; then
+    break
+  fi
+  sleep 1
+done
+[[ -z "$(
+  kubectl --namespace kube-system get pods \
+    --selector k8s-app=metrics-server \
+    --output name
+)" ]]
+start_stress 45s
+scaled_without_metrics="$(
+  wait_json 30 2 \
+    cluster_snapshot \
+    "$(scaling_predicate ".resourceScaling.mode == \"Auto\" and .resourceScaling.desiredResources.cpuMillicores > ${before_metrics_outage} and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores")"
 )"
-[[ "${before_metrics_outage}" == "${after_metrics_outage}" ]]
+stop_stress
+[[ -n "${scaled_without_metrics}" ]]
 kubectl --namespace kube-system scale deployment/metrics-server \
   --replicas="${metrics_replicas}" >/dev/null
 metrics_replicas=""

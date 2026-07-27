@@ -34,6 +34,12 @@ type fakePodMetricsReader struct {
 	calls   int
 }
 
+type warmingPodMetricsReader struct{}
+
+func (f *fakePodMetricsReader) BeginCycle() {}
+
+func (*warmingPodMetricsReader) BeginCycle() {}
+
 func (c *manualBeforeResizeClient) Get(
 	ctx context.Context,
 	key client.ObjectKey,
@@ -66,17 +72,24 @@ func (f *fakePodResizer) UpdateResize(_ context.Context, pod *corev1.Pod) (*core
 
 func (f *fakePodMetricsReader) GetAgentPodMetric(
 	_ context.Context,
-	_, _ string,
-) (AgentPodMetric, error) {
+	_ *corev1.Pod,
+) (AgentPodMetric, bool, error) {
 	f.calls++
 	if f.err != nil {
-		return AgentPodMetric{}, f.err
+		return AgentPodMetric{}, false, f.err
 	}
 	index := f.calls - 1
 	if index >= len(f.metrics) {
 		index = len(f.metrics) - 1
 	}
-	return f.metrics[index], nil
+	return f.metrics[index], true, nil
+}
+
+func (*warmingPodMetricsReader) GetAgentPodMetric(
+	context.Context,
+	*corev1.Pod,
+) (AgentPodMetric, bool, error) {
+	return AgentPodMetric{}, false, nil
 }
 
 func TestResourceAutoscalerAppliesManualLimitsWithoutChangingRequestsOrSidecar(t *testing.T) {
@@ -305,7 +318,7 @@ func TestResourceAutoscalerKeepsLimitWhenMetricsOrActualResourcesAreUnavailable(
 	}{
 		{
 			name:    "metrics unavailable",
-			metrics: &fakePodMetricsReader{err: errors.New("metrics API unavailable")},
+			metrics: &fakePodMetricsReader{err: errors.New("Kubelet Summary unavailable")},
 		},
 		{
 			name: "actual resources unavailable", removeActual: true,
@@ -344,6 +357,34 @@ func TestResourceAutoscalerKeepsLimitWhenMetricsOrActualResourcesAreUnavailable(
 				t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
 			}
 		})
+	}
+}
+
+func TestResourceAutoscalerWarmsUpWhileKubeletCounterBaselineIsPending(t *testing.T) {
+	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
+	session, _, k8s := autoScalingFixture(t)
+	resizer := &fakePodResizer{}
+	autoscaler := &ResourceAutoscaler{
+		Client: k8s, Resizer: resizer, Metrics: &warmingPodMetricsReader{},
+		Now: func() time.Time { return now },
+	}
+
+	if err := autoscaler.reconcileSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if resizer.calls != 0 {
+		t.Fatal("Kubelet baseline changed resources")
+	}
+	var current bosunv1alpha1.AgentSession
+	if err := k8s.Get(
+		context.Background(), client.ObjectKeyFromObject(session), &current,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if current.Status.ResourceScaling == nil ||
+		current.Status.ResourceScaling.LoadClass != bosunv1alpha1.ResourceLoadClassWarmingUp ||
+		current.Status.ResourceScaling.LastError != "" {
+		t.Fatalf("resource scaling status = %#v", current.Status.ResourceScaling)
 	}
 }
 
