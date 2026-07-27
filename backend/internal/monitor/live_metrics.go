@@ -52,6 +52,16 @@ func (s *liveMetricSampler) podMetric(
 		elapsed := counterObservedAt.Sub(state.rawObservedAt)
 
 		switch {
+		case counter.CPUUsageNanoCoresAvailable &&
+			(state.rawObservedAt.IsZero() || counterObservedAt.After(state.rawObservedAt)):
+			state = liveCPUState{
+				counterSeconds:  counter.CPUUsageSeconds,
+				rawObservedAt:   counterObservedAt,
+				usage:           nanoCoresToMillicores(counter.CPUUsageNanoCores),
+				memoryBytes:     counter.MemoryWorkingSetBytes,
+				usageObservedAt: counterObservedAt,
+				ready:           true,
+			}
 		case state.rawObservedAt.IsZero(),
 			counter.CPUUsageSeconds < state.counterSeconds,
 			counterObservedAt.Before(state.rawObservedAt),
@@ -88,4 +98,8 @@ func (s *liveMetricSampler) podMetric(
 		}
 	}
 	return result, complete
+}
+
+func nanoCoresToMillicores(nanoCores uint64) int64 {
+	return int64((nanoCores + 500_000) / 1_000_000)
 }

@@ -18,7 +18,7 @@ const (
 	maximumKubeletSampleInterval = 2 * time.Minute
 )
 
-// AgentPodMetric is one CPU observation derived from consecutive Kubelet counters.
+// AgentPodMetric is one CPU observation reported by Kubelet.
 type AgentPodMetric struct {
 	Timestamp          time.Time
 	Window             time.Duration
@@ -32,8 +32,10 @@ type PodMetricsReader interface {
 }
 
 type kubeletContainerCounter struct {
-	observedAt time.Time
-	usage      uint64
+	observedAt         time.Time
+	usage              uint64
+	usageNanoCores     uint64
+	nanoCoresAvailable bool
 }
 
 type kubeletCPUState struct {
@@ -41,7 +43,7 @@ type kubeletCPUState struct {
 }
 
 // kubeletPodMetricsReader reads one Summary snapshot per Node during each
-// autoscaler cycle and keeps the previous counter for each Agent container.
+// autoscaler cycle and keeps the previous sample for each Agent container.
 type kubeletPodMetricsReader struct {
 	client kubernetes.Interface
 
@@ -119,11 +121,19 @@ func (r *kubeletPodMetricsReader) GetAgentPodMetric(
 	}
 
 	state := r.states[identity]
-	if state.counter.observedAt.IsZero() {
-		r.states[identity] = kubeletCPUState{counter: counter}
+	if !state.counter.observedAt.IsZero() &&
+		!counter.observedAt.After(state.counter.observedAt) {
 		return AgentPodMetric{}, false, nil
 	}
-	if !counter.observedAt.After(state.counter.observedAt) {
+	if counter.nanoCoresAvailable {
+		r.states[identity] = kubeletCPUState{counter: counter}
+		return AgentPodMetric{
+			Timestamp:          counter.observedAt,
+			CPUUsageMillicores: nanoCoresToMillicores(counter.usageNanoCores),
+		}, true, nil
+	}
+	if state.counter.observedAt.IsZero() {
+		r.states[identity] = kubeletCPUState{counter: counter}
 		return AgentPodMetric{}, false, nil
 	}
 
@@ -178,6 +188,7 @@ type kubeletSummary struct {
 			Name string `json:"name"`
 			CPU  *struct {
 				Time                 string  `json:"time"`
+				UsageNanoCores       *uint64 `json:"usageNanoCores"`
 				UsageCoreNanoSeconds *uint64 `json:"usageCoreNanoSeconds"`
 			} `json:"cpu"`
 		} `json:"containers"`
@@ -200,21 +211,31 @@ func agentCountersFromSummary(raw []byte) (map[string]kubeletContainerCounter, e
 			container := &pod.Containers[j]
 			if container.Name != agentContainerName ||
 				container.CPU == nil ||
-				container.CPU.UsageCoreNanoSeconds == nil {
+				(container.CPU.UsageNanoCores == nil &&
+					container.CPU.UsageCoreNanoSeconds == nil) {
 				continue
 			}
 			observedAt, err := time.Parse(time.RFC3339Nano, container.CPU.Time)
 			if err != nil || observedAt.IsZero() {
 				continue
 			}
-			result[pod.PodRef.Namespace+"/"+pod.PodRef.Name] = kubeletContainerCounter{
-				observedAt: observedAt.UTC(),
-				usage:      *container.CPU.UsageCoreNanoSeconds,
+			counter := kubeletContainerCounter{observedAt: observedAt.UTC()}
+			if container.CPU.UsageCoreNanoSeconds != nil {
+				counter.usage = *container.CPU.UsageCoreNanoSeconds
 			}
+			if container.CPU.UsageNanoCores != nil {
+				counter.usageNanoCores = *container.CPU.UsageNanoCores
+				counter.nanoCoresAvailable = true
+			}
+			result[pod.PodRef.Namespace+"/"+pod.PodRef.Name] = counter
 			break
 		}
 	}
 	return result, nil
+}
+
+func nanoCoresToMillicores(nanoCores uint64) int64 {
+	return int64((nanoCores + 500_000) / 1_000_000)
 }
 
 func agentMetricIdentity(pod *corev1.Pod) types.UID {

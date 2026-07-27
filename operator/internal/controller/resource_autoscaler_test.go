@@ -189,6 +189,34 @@ func TestNodeFreeCPUUsesAllocatableAndAllContainerLimits(t *testing.T) {
 	}
 }
 
+func TestNodeFreeCPUIgnoresTerminalPods(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testWorkerNodeName}}
+	node.Status.Allocatable = corev1.ResourceList{
+		corev1.ResourceCPU: resource.MustParse("2"),
+	}
+	terminalPod := func(name string, phase corev1.PodPhase) corev1.Pod {
+		return corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: corev1.PodSpec{
+				NodeName: testWorkerNodeName,
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("32"),
+					}},
+				}},
+			},
+			Status: corev1.PodStatus{Phase: phase},
+		}
+	}
+	pods := []corev1.Pod{
+		terminalPod("succeeded", corev1.PodSucceeded),
+		terminalPod("failed", corev1.PodFailed),
+	}
+	if got := nodeFreeCPU(node, pods); got != 2000 {
+		t.Fatalf("nodeFreeCPU() = %dm, want 2000m", got)
+	}
+}
+
 func TestPendingReservationUsesPriorityOrderAndStableNodeChoice(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {

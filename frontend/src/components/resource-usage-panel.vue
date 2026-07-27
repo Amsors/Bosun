@@ -158,7 +158,7 @@ onUnmounted(() => {
         <strong>{{ formatCPU(agent?.limits.cpuMillicores || 0) }}</strong>
         CPU /
         <strong>{{ formatMemory(agent?.limits.memoryBytes || 0) }}</strong>
-        内存；图表中的 Limit 为包含平台 sidecar 的 Pod 总量。
+        内存；图表中的 Request 与 Limit 均为 Agent 容器资源，当前用量包含平台 sidecar。
       </p>
       <p v-if="snapshot.pod.resize" class="metrics-note" role="status">
         Kubernetes 正在应用资源调整：{{ snapshot.pod.resize.reason || snapshot.pod.resize.state }}
@@ -167,8 +167,8 @@ onUnmounted(() => {
         <ResourceChart
           title="CPU"
           :current="snapshot.pod.usage?.cpuMillicores || 0"
-          :request="snapshot.pod.requests.cpuMillicores"
-          :limit="snapshot.pod.limits.cpuMillicores"
+          :request="agent?.requests.cpuMillicores || 0"
+          :limit="agent?.limits.cpuMillicores || 0"
           :samples="cpuSamples"
           :formatter="formatCPU"
           :refresh-interval-ms="refreshIntervalMs"
@@ -176,8 +176,8 @@ onUnmounted(() => {
         <ResourceChart
           title="内存"
           :current="snapshot.pod.usage?.memoryBytes || 0"
-          :request="snapshot.pod.requests.memoryBytes"
-          :limit="snapshot.pod.limits.memoryBytes"
+          :request="agent?.requests.memoryBytes || 0"
+          :limit="agent?.limits.memoryBytes || 0"
           :samples="memorySamples"
           :formatter="formatMemory"
           :refresh-interval-ms="refreshIntervalMs"

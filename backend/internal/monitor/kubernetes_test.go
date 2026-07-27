@@ -56,6 +56,7 @@ func TestPodCountersFromSummaryParsesContainerCounters(t *testing.T) {
 				"name": "agent",
 				"cpu": {
 					"time": "2026-07-26T06:00:00.25Z",
+					"usageNanoCores": 125400000,
 					"usageCoreNanoSeconds": 12250000000
 				},
 				"memory": {"workingSetBytes": 268435456}
@@ -69,6 +70,9 @@ func TestPodCountersFromSummaryParsesContainerCounters(t *testing.T) {
 	agent := result["demo/agent-1"].Containers["agent"]
 	if agent.CPUUsageSeconds != 12.25 || agent.MemoryWorkingSetBytes != 256*1024*1024 {
 		t.Fatalf("agent counter = %#v", agent)
+	}
+	if !agent.CPUUsageNanoCoresAvailable || agent.CPUUsageNanoCores != 125400000 {
+		t.Fatalf("agent nanoCores = %#v", agent)
 	}
 	expectedContainerObservedAt := time.Date(2026, 7, 26, 6, 0, 0, 250000000, time.UTC)
 	if !agent.ObservedAt.Equal(expectedContainerObservedAt) {
@@ -85,7 +89,7 @@ func TestKubernetesSourceReadsStatsSummaryThroughNodeProxy(t *testing.T) {
 		requestedPath = request.URL.Path
 		body := `{"pods":[{"podRef":{"namespace":"demo","name":"agent-1"},"containers":[{
 			"name":"agent",
-			"cpu":{"time":"2026-07-26T06:00:00Z","usageCoreNanoSeconds":12250000000},
+			"cpu":{"time":"2026-07-26T06:00:00Z","usageNanoCores":125400000,"usageCoreNanoSeconds":12250000000},
 			"memory":{"workingSetBytes":268435456}
 		}]}]}`
 		return &http.Response{
@@ -112,6 +116,9 @@ func TestKubernetesSourceReadsStatsSummaryThroughNodeProxy(t *testing.T) {
 		t.Fatalf("requested path = %q", requestedPath)
 	}
 	if result["demo/agent-1"].Containers["agent"].CPUUsageSeconds != 12.25 {
+		t.Fatalf("result = %#v", result)
+	}
+	if result["demo/agent-1"].Containers["agent"].CPUUsageNanoCores != 125400000 {
 		t.Fatalf("result = %#v", result)
 	}
 }

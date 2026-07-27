@@ -39,6 +39,7 @@ func TestAgentCountersFromSummaryParsesOnlyAgentContainers(t *testing.T) {
 					"name": "agent",
 					"cpu": {
 						"time": "2026-07-26T06:00:00.25Z",
+						"usageNanoCores": 125400000,
 						"usageCoreNanoSeconds": 12250000000
 					}
 				}
@@ -53,6 +54,9 @@ func TestAgentCountersFromSummaryParsesOnlyAgentContainers(t *testing.T) {
 	counter := result["demo/agent-1"]
 	if counter.usage != 12250000000 {
 		t.Fatalf("usage = %d", counter.usage)
+	}
+	if !counter.nanoCoresAvailable || counter.usageNanoCores != 125400000 {
+		t.Fatalf("nanoCores = %#v", counter)
 	}
 	expected := time.Date(2026, 7, 26, 6, 0, 0, 250000000, time.UTC)
 	if !counter.observedAt.Equal(expected) {
@@ -108,6 +112,40 @@ func TestKubeletPodMetricsReaderCalculatesCPUAndCachesNodeSummary(t *testing.T) 
 	_, ready, err = reader.GetAgentPodMetric(context.Background(), pod)
 	if err != nil || ready {
 		t.Fatalf("duplicate observation = ready %t, error %v", ready, err)
+	}
+}
+
+func TestKubeletPodMetricsReaderPrefersNanoCoresOverDistortedCounterRate(t *testing.T) {
+	base := time.Date(2026, 7, 27, 3, 35, 16, 0, time.UTC)
+	requests := 0
+	coreClient := kubeletTestClient(t, func(*http.Request) string {
+		requests++
+		if requests == 1 {
+			return kubeletSummaryBodyWithNanoCores(
+				base,
+				1_311_103_749_000,
+				3_011_743_437,
+			)
+		}
+		return kubeletSummaryBodyWithNanoCores(
+			base.Add(time.Second),
+			1_315_840_217_000,
+			2_990_599_311,
+		)
+	})
+	reader := NewKubeletPodMetricsReader(coreClient)
+	pod := kubeletMetricTestPod("agent-1", "pod-1")
+
+	reader.BeginCycle()
+	first, ready, err := reader.GetAgentPodMetric(context.Background(), pod)
+	if err != nil || !ready || first.CPUUsageMillicores != 3012 {
+		t.Fatalf("first observation = %#v, ready %t, error %v", first, ready, err)
+	}
+
+	reader.BeginCycle()
+	second, ready, err := reader.GetAgentPodMetric(context.Background(), pod)
+	if err != nil || !ready || second.CPUUsageMillicores != 2991 {
+		t.Fatalf("second observation = %#v, ready %t, error %v", second, ready, err)
 	}
 }
 
@@ -209,4 +247,24 @@ func kubeletSummaryBody(observedAt time.Time, usage uint64) string {
 			}]
 		}]
 	}`, observedAt.Format(time.RFC3339Nano), usage)
+}
+
+func kubeletSummaryBodyWithNanoCores(
+	observedAt time.Time,
+	usage uint64,
+	usageNanoCores uint64,
+) string {
+	return fmt.Sprintf(`{
+		"pods": [{
+			"podRef": {"namespace": "demo", "name": "agent-1"},
+			"containers": [{
+				"name": "agent",
+				"cpu": {
+					"time": %q,
+					"usageNanoCores": %d,
+					"usageCoreNanoSeconds": %d
+				}
+			}]
+		}]
+	}`, observedAt.Format(time.RFC3339Nano), usageNanoCores, usage)
 }
