@@ -61,7 +61,7 @@ ingress:
     https: websecure
   tlsSecretName: bosun-tls
   rateLimit:
-    enabled: true
+    enabled: false
     average: 100
     burst: 50
     period: 1m
