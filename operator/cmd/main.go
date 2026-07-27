@@ -267,16 +267,17 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.AgentSessionReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		AgentImage:       agentImage,
-		AgentPullPolicy:  corev1.PullPolicy(agentImagePullPolicy),
-		StorageClassName: workspaceStorageClass,
-		GatewayURL:       gatewayURL,
-		EgressProxyURL:   egressProxyURL,
-		IdleScanInterval: idleScanInterval,
-		Quiescer:         quiescer,
-		StateReader:      quiescer,
+		Client:                    mgr.GetClient(),
+		Scheme:                    mgr.GetScheme(),
+		AgentImage:                agentImage,
+		AgentPullPolicy:           corev1.PullPolicy(agentImagePullPolicy),
+		StorageClassName:          workspaceStorageClass,
+		GatewayURL:                gatewayURL,
+		EgressProxyURL:            egressProxyURL,
+		IdleScanInterval:          idleScanInterval,
+		CapacitySchedulingEnabled: resourceAutoscalingEnabled,
+		Quiescer:                  quiescer,
+		StateReader:               quiescer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentsession")
 		os.Exit(1)

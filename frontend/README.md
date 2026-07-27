@@ -33,11 +33,9 @@ make dev-forward
 
 全局资源监控位于 `/admin`，资源刷新周期可选择 1、2、5、10、30 或 60 秒（默认 5 秒），
 设置会保存在浏览器中，并与会话详情资源图表共用。页面可分别显示或隐藏 `kube-system`、
-`cert-manager`，也可只查看 Agent Pod。页面展示 Agent 的 Auto/Manual 模式、desired /
-actual resources 与 Kubernetes resize condition；手动提交会持久化为 Manual intent，
-Auto 模式还会展示 CPU load class、CPU recommendation 和最近应用时间；手动提交会
-持久化为 Manual intent，也可恢复自动调度。轮询不会覆盖正在编辑的资源 draft。该页面
-及其资源调整接口按课程展示需求无需登录。
+`cert-manager`，也可只查看 Agent Pod。页面展示 Agent 的 desired / actual resources、
+Kubernetes resize condition、CPU load class、CPU recommendation 和最近应用时间。
+资源由 Operator 按优先级和节点容量自动调度，该页面按课程展示需求无需登录。
 
 1 秒刷新配合本地 Kubelet 1 秒 cAdvisor housekeeping，可通过 Kubelet Summary API
 显示相邻累计 CPU 计数器计算出的真实秒级负载；页面分别展示 API 查询时间与指标采样时间，

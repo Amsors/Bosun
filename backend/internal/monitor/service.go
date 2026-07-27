@@ -14,17 +14,12 @@ import (
 
 	"github.com/Amsors/Bosun/backend/internal/session"
 	bosunv1alpha1 "github.com/Amsors/Bosun/operator/api/v1alpha1"
-	"github.com/Amsors/Bosun/operator/pkg/resourcepolicy"
 	"github.com/Amsors/Bosun/operator/pkg/sessionidentity"
 )
 
 const requestTimeout = 8 * time.Second
 
 const agentContainerName = "agent"
-
-var (
-	ErrInvalidResize = errors.New("invalid agent resource limits")
-)
 
 type SessionStore interface {
 	Get(context.Context, uuid.UUID, uuid.UUID) (session.Session, error)
@@ -182,95 +177,6 @@ func podMetricPointer(metric PodMetric, err error) *PodMetric {
 	return &metric
 }
 
-func (s *Service) ResizeAgent(
-	ctx context.Context,
-	sessionID uuid.UUID,
-	request ResizeRequest,
-) (ResourceScalingResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	sessions, err := s.source.ListAgentSessions(ctx)
-	if err != nil {
-		return ResourceScalingResponse{}, fmt.Errorf("list AgentSessions before resource update: %w", err)
-	}
-	cr := agentSessionForID(sessions, sessionID.String())
-	if cr == nil {
-		return ResourceScalingResponse{}, session.ErrNotFound
-	}
-	limits := bosunv1alpha1.ResourceValues(request)
-	if err := resourcepolicy.ValidateManualLimits(limits); err != nil {
-		return ResourceScalingResponse{}, fmt.Errorf("%w: %v", ErrInvalidResize, err)
-	}
-	updated, err := s.source.UpdateResourceScaling(
-		ctx,
-		cr.Namespace,
-		cr.Name,
-		sessionID.String(),
-		&bosunv1alpha1.ResourceScalingSpec{
-			Mode:         bosunv1alpha1.ResourceScalingModeManual,
-			ManualLimits: &limits,
-		},
-	)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return ResourceScalingResponse{}, session.ErrNotFound
-		}
-		return ResourceScalingResponse{}, fmt.Errorf("persist Manual resource intent: %w", err)
-	}
-	return s.resourceScalingResponse(ctx, updated)
-}
-
-func (s *Service) RestoreAuto(
-	ctx context.Context,
-	sessionID uuid.UUID,
-) (ResourceScalingResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	sessions, err := s.source.ListAgentSessions(ctx)
-	if err != nil {
-		return ResourceScalingResponse{}, fmt.Errorf("list AgentSessions before restoring Auto: %w", err)
-	}
-	cr := agentSessionForID(sessions, sessionID.String())
-	if cr == nil {
-		return ResourceScalingResponse{}, session.ErrNotFound
-	}
-	updated, err := s.source.UpdateResourceScaling(
-		ctx,
-		cr.Namespace,
-		cr.Name,
-		sessionID.String(),
-		&bosunv1alpha1.ResourceScalingSpec{Mode: bosunv1alpha1.ResourceScalingModeAuto},
-	)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return ResourceScalingResponse{}, session.ErrNotFound
-		}
-		return ResourceScalingResponse{}, fmt.Errorf("persist Auto resource intent: %w", err)
-	}
-	return s.resourceScalingResponse(ctx, updated)
-}
-
-func (s *Service) resourceScalingResponse(
-	ctx context.Context,
-	cr *bosunv1alpha1.AgentSession,
-) (ResourceScalingResponse, error) {
-	var pod *corev1.Pod
-	current, err := s.source.GetPod(ctx, cr.Namespace, sessionidentity.PodName(cr.Spec.SessionID))
-	if err == nil {
-		pod = current
-	} else if !apierrors.IsNotFound(err) {
-		return ResourceScalingResponse{}, fmt.Errorf("get Agent Pod after resource intent update: %w", err)
-	}
-	response := ResourceScalingResponse{
-		ObservedAt:                   s.now(),
-		AgentResourceScalingSnapshot: snapshotAgentScaling(cr, pod),
-	}
-	if pod != nil {
-		response.Resize = podResizeSnapshot(pod)
-	}
-	return response, nil
-}
-
 func snapshotPod(
 	pod *corev1.Pod,
 	metric *PodMetric,
@@ -349,17 +255,7 @@ func snapshotAgentScaling(
 	cr *bosunv1alpha1.AgentSession,
 	pod *corev1.Pod,
 ) AgentResourceScalingSnapshot {
-	effective := cr.Spec.EffectiveResourceScaling()
-	result := AgentResourceScalingSnapshot{Mode: string(effective.Mode)}
-	if effective.ManualLimits != nil {
-		limits := Resources(*effective.ManualLimits)
-		result.ManualLimits = &limits
-	}
-	policy := resourcepolicy.Policy()
-	result.MinCPUMillicores = policy.MinCPULimit
-	result.MaxCPUMillicores = policy.MaxCPULimit
-	result.MinMemoryBytes = policy.MinMemoryLimitBytes
-	result.MaxMemoryBytes = policy.MaxMemoryLimitBytes
+	result := AgentResourceScalingSnapshot{}
 	if cr.Status.ResourceScaling != nil {
 		result.LoadClass = string(cr.Status.ResourceScaling.LoadClass)
 		result.RecommendedCPUMillicores = cr.Status.ResourceScaling.RecommendedCPUMillicores
@@ -384,18 +280,6 @@ func snapshotAgentScaling(
 		result.ActualResourcesAvailable = true
 	}
 	return result
-}
-
-func agentSessionForID(
-	sessions []bosunv1alpha1.AgentSession,
-	sessionID string,
-) *bosunv1alpha1.AgentSession {
-	for i := range sessions {
-		if sessions[i].Spec.SessionID == sessionID {
-			return &sessions[i]
-		}
-	}
-	return nil
 }
 
 func podResizeSnapshot(pod *corev1.Pod) *PodResizeSnapshot {

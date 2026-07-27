@@ -27,6 +27,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - nodes/proxy
   verbs:
   - get
@@ -60,10 +68,11 @@ rules:
   - bosun.io
   resources:
   - agentsessions
-  - userenvironments
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - bosun.io
@@ -81,6 +90,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - bosun.io
+  resources:
+  - userenvironments
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

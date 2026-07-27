@@ -22,7 +22,6 @@ type StoragePolicy string
 type AgentSessionPhase string
 type RuntimeCheckpointMode string
 type RuntimeCheckpointState string
-type ResourceScalingMode string
 type ResourceLoadClass string
 
 const (
@@ -58,9 +57,6 @@ const (
 	RuntimeCheckpointStateConsumed  RuntimeCheckpointState = "Consumed"
 	RuntimeCheckpointStateFailed    RuntimeCheckpointState = "Failed"
 
-	ResourceScalingModeAuto   ResourceScalingMode = "Auto"
-	ResourceScalingModeManual ResourceScalingMode = "Manual"
-
 	ResourceLoadClassUnknown   ResourceLoadClass = "Unknown"
 	ResourceLoadClassWarmingUp ResourceLoadClass = "WarmingUp"
 	ResourceLoadClassCPUHigh   ResourceLoadClass = "CPUHigh"
@@ -76,24 +72,6 @@ type ProviderSpec struct {
 	// CredentialID is a business identifier and never contains provider credentials.
 	// +optional
 	CredentialID string `json:"credentialID,omitempty"`
-}
-
-type ResourceValues struct {
-	// +kubebuilder:validation:Minimum=1
-	CPUMillicores int64 `json:"cpuMillicores"`
-
-	// +kubebuilder:validation:Minimum=1
-	MemoryBytes int64 `json:"memoryBytes"`
-}
-
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Manual' ? has(self.manualLimits) : !has(self.manualLimits)",message="manualLimits must be set only in Manual mode"
-type ResourceScalingSpec struct {
-	// +kubebuilder:validation:Enum=Auto;Manual
-	// +kubebuilder:default=Auto
-	Mode ResourceScalingMode `json:"mode"`
-
-	// +optional
-	ManualLimits *ResourceValues `json:"manualLimits,omitempty"`
 }
 
 type AgentSessionSpec struct {
@@ -133,11 +111,6 @@ type AgentSessionSpec struct {
 	// +kubebuilder:validation:Enum=bosun-free;bosun-normal;bosun-high
 	// +kubebuilder:default=bosun-normal
 	PriorityClassName string `json:"priorityClassName"`
-
-	// ResourceScaling is nil only on objects created before resource scaling was introduced.
-	// A nil value is interpreted as Auto.
-	// +optional
-	ResourceScaling *ResourceScalingSpec `json:"resourceScaling,omitempty"`
 }
 
 type ArchiveStatus struct {
@@ -201,15 +174,6 @@ type AgentSessionStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// EffectiveResourceScaling returns a copy of the persisted scaling intent.
-// Legacy AgentSessions without resourceScaling are treated as Auto.
-func (s *AgentSessionSpec) EffectiveResourceScaling() ResourceScalingSpec {
-	if s.ResourceScaling == nil {
-		return ResourceScalingSpec{Mode: ResourceScalingModeAuto}
-	}
-	return *s.ResourceScaling.DeepCopy()
 }
 
 // +kubebuilder:object:root=true

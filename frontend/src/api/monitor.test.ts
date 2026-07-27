@@ -12,8 +12,6 @@ describe('monitor API', () => {
 
     await monitorApi.cluster()
     await monitorApi.session('access-token', 'session/id')
-    await monitorApi.resizeAgent('session/id', { cpuMillicores: 700, memoryBytes: 3221225472 })
-    await monitorApi.restoreAuto('session/id')
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -29,22 +27,6 @@ describe('monitor API', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
     )
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      '/api/v1/admin/sessions/session%2Fid/resources',
-      expect.objectContaining({
-        method: 'PUT',
-        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
-        body: JSON.stringify({ cpuMillicores: 700, memoryBytes: 3221225472 }),
-      }),
-    )
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      '/api/v1/admin/sessions/session%2Fid/resources',
-      expect.objectContaining({
-        method: 'DELETE',
-        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
-      }),
-    )
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

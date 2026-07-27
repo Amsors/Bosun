@@ -15,7 +15,6 @@ func (e Error) Error() string {
 
 var (
 	InvalidArgument     = Error{Code: 10001, Name: "invalid_argument", Message: "请求参数无效", HTTPStatus: http.StatusBadRequest}
-	InvalidResources    = Error{Code: 10003, Name: "invalid_resources", Message: "资源超出当前规格允许范围", HTTPStatus: http.StatusUnprocessableEntity}
 	IdempotencyConflict = Error{Code: 10002, Name: "idempotency_conflict", Message: "幂等键与原请求冲突", HTTPStatus: http.StatusConflict}
 	InvalidCredentials  = Error{Code: 20001, Name: "invalid_credentials", Message: "认证凭据无效", HTTPStatus: http.StatusUnauthorized}
 	TokenExpired        = Error{Code: 20002, Name: "token_expired", Message: "访问凭据已过期", HTTPStatus: http.StatusUnauthorized}

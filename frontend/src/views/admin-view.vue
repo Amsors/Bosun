@@ -21,15 +21,10 @@ const search = ref('')
 const showKubeSystem = ref(false)
 const showCertManager = ref(false)
 const agentOnly = ref(false)
-const resizeDrafts = ref<Record<string, { cpuMillicores: number; memoryMiB: number }>>({})
-const resizeDirty = ref<Record<string, boolean>>({})
-const resizeBusy = ref<Record<string, boolean>>({})
-const resizeErrors = ref<Record<string, string>>({})
 const refreshIntervalMs = ref(loadResourceRefreshInterval())
 let poller: ReturnType<typeof globalThis.setInterval> | null = null
 let requestActive = false
 let mounted = false
-const mebibyte = 1024 * 1024
 
 const visiblePods = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
@@ -60,7 +55,6 @@ async function load(): Promise<void> {
   requestActive = true
   try {
     const next = await monitorApi.cluster()
-    syncResizeDrafts(next.pods)
     snapshot.value = next
     error.value = ''
   } catch {
@@ -73,81 +67,6 @@ async function load(): Promise<void> {
 
 function agentContainer(pod: PodResourceSnapshot): ContainerResourceSnapshot | undefined {
   return pod.containers.find((container) => container.name === 'agent')
-}
-
-function draftFromPod(pod: PodResourceSnapshot): { cpuMillicores: number; memoryMiB: number } {
-  const limits = pod.resourceScaling?.manualLimits || agentContainer(pod)?.limits
-  return {
-    cpuMillicores: limits?.cpuMillicores || 0,
-    memoryMiB: Math.round((limits?.memoryBytes || 0) / mebibyte),
-  }
-}
-
-function sameDraft(
-  left: { cpuMillicores: number; memoryMiB: number } | undefined,
-  right: { cpuMillicores: number; memoryMiB: number },
-): boolean {
-  return left?.cpuMillicores === right.cpuMillicores && left.memoryMiB === right.memoryMiB
-}
-
-function syncResizeDrafts(pods: PodResourceSnapshot[]): void {
-  for (const pod of pods) {
-    if (!pod.isAgent || !pod.sessionID || !agentContainer(pod)) continue
-    const current = draftFromPod(pod)
-    if (!resizeDrafts.value[pod.sessionID] || !resizeDirty.value[pod.sessionID]) {
-      resizeDrafts.value[pod.sessionID] = current
-    }
-  }
-}
-
-function startResizeEdit(sessionID: string): void {
-  resizeDirty.value[sessionID] = true
-}
-
-function finishResizeEdit(pod: PodResourceSnapshot): void {
-  if (!pod.sessionID) return
-  resizeDirty.value[pod.sessionID] = !sameDraft(
-    resizeDrafts.value[pod.sessionID],
-    draftFromPod(pod),
-  )
-}
-
-function minimumCPU(pod: PodResourceSnapshot): number {
-  return pod.resourceScaling?.minCPUMillicores || agentContainer(pod)?.requests.cpuMillicores || 1
-}
-
-function minimumMemoryMiB(pod: PodResourceSnapshot): number {
-  return Math.ceil(
-    (pod.resourceScaling?.minMemoryBytes || agentContainer(pod)?.requests.memoryBytes || 1) /
-      mebibyte,
-  )
-}
-
-function canResize(pod: PodResourceSnapshot): boolean {
-  if (!pod.sessionID || pod.phase === 'Terminating' || resizeBusy.value[pod.sessionID]) return false
-  const draft = resizeDrafts.value[pod.sessionID]
-  if (
-    !draft ||
-    !Number.isInteger(draft.cpuMillicores) ||
-    !Number.isInteger(draft.memoryMiB) ||
-    draft.cpuMillicores < minimumCPU(pod) ||
-    draft.memoryMiB < minimumMemoryMiB(pod) ||
-    (pod.resourceScaling &&
-      (draft.cpuMillicores > pod.resourceScaling.maxCPUMillicores ||
-        draft.memoryMiB * mebibyte > pod.resourceScaling.maxMemoryBytes))
-  )
-    return false
-  return pod.resourceScaling?.mode === 'Auto' || !sameDraft(draft, draftFromPod(pod))
-}
-
-function manualIntentQueued(pod: PodResourceSnapshot): boolean {
-  const scaling = pod.resourceScaling
-  return (
-    scaling?.mode === 'Manual' &&
-    !!scaling.manualLimits &&
-    (scaling.manualLimits.cpuMillicores !== scaling.desiredResources.cpuMillicores ||
-      scaling.manualLimits.memoryBytes !== scaling.desiredResources.memoryBytes)
-  )
 }
 
 function loadClassLabel(loadClass: ResourceLoadClass): string {
@@ -167,61 +86,6 @@ function formatAppliedAt(timestamp: string): string {
 
 function metricSourceLabel(source: string | undefined): string {
   return source === 'kubelet-summary' ? '秒级' : 'metrics-server'
-}
-
-async function applyResize(pod: PodResourceSnapshot): Promise<void> {
-  if (!pod.sessionID || !canResize(pod)) return
-  const sessionID = pod.sessionID
-  const draft = resizeDrafts.value[sessionID]!
-  resizeBusy.value[sessionID] = true
-  resizeErrors.value[sessionID] = ''
-  try {
-    const result = await monitorApi.resizeAgent(sessionID, {
-      cpuMillicores: draft.cpuMillicores,
-      memoryBytes: draft.memoryMiB * mebibyte,
-    })
-    if (snapshot.value) {
-      snapshot.value = {
-        ...snapshot.value,
-        observedAt: result.observedAt,
-        pods: snapshot.value.pods.map((item) => {
-          if (item.namespace !== pod.namespace || item.name !== pod.name) return item
-          return { ...item, resourceScaling: result, resize: result.resize }
-        }),
-      }
-    }
-    resizeDirty.value[sessionID] = false
-  } catch {
-    resizeErrors.value[sessionID] = '保存手动资源意图失败，请检查输入值是否位于当前规格范围内。'
-  } finally {
-    resizeBusy.value[sessionID] = false
-  }
-}
-
-async function restoreAuto(pod: PodResourceSnapshot): Promise<void> {
-  if (!pod.sessionID || resizeBusy.value[pod.sessionID]) return
-  const sessionID = pod.sessionID
-  resizeBusy.value[sessionID] = true
-  resizeErrors.value[sessionID] = ''
-  try {
-    const result = await monitorApi.restoreAuto(sessionID)
-    if (snapshot.value) {
-      snapshot.value = {
-        ...snapshot.value,
-        observedAt: result.observedAt,
-        pods: snapshot.value.pods.map((item) =>
-          item.namespace === pod.namespace && item.name === pod.name
-            ? { ...item, resourceScaling: result, resize: result.resize }
-            : item,
-        ),
-      }
-    }
-    resizeDirty.value[sessionID] = false
-  } catch {
-    resizeErrors.value[sessionID] = '恢复自动调度失败，请稍后重试。'
-  } finally {
-    resizeBusy.value[sessionID] = false
-  }
 }
 
 function startPolling(): void {
@@ -412,9 +276,7 @@ onUnmounted(() => {
                 <td>
                   <template v-if="pod.isAgent">
                     <span class="agent-badge">AGENT</span>
-                    <span class="agent-badge">
-                      {{ pod.resourceScaling?.mode === 'Manual' ? '手动固定' : '自动调度' }}
-                    </span>
+                    <span class="agent-badge">公平调度</span>
                     <strong>{{ pod.username || '未知用户' }}</strong>
                     <span>{{ pod.sessionName || pod.sessionID }}</span>
                     <span v-if="pod.resourceScaling?.loadClass">
@@ -424,66 +286,13 @@ onUnmounted(() => {
                   <span v-else>—</span>
                 </td>
                 <td>
-                  <form
-                    v-if="pod.isAgent && pod.sessionID && resizeDrafts[pod.sessionID]"
-                    class="resize-form"
-                    @submit.prevent="applyResize(pod)"
-                  >
-                    <label>
-                      <span>CPU (m)</span>
-                      <input
-                        v-model.number="resizeDrafts[pod.sessionID].cpuMillicores"
-                        type="number"
-                        step="1"
-                        :min="minimumCPU(pod)"
-                        :max="pod.resourceScaling?.maxCPUMillicores"
-                        :disabled="resizeBusy[pod.sessionID] || pod.phase === 'Terminating'"
-                        @focus="startResizeEdit(pod.sessionID)"
-                        @input="startResizeEdit(pod.sessionID)"
-                        @blur="finishResizeEdit(pod)"
-                      />
-                    </label>
-                    <label>
-                      <span>内存 (MiB)</span>
-                      <input
-                        v-model.number="resizeDrafts[pod.sessionID].memoryMiB"
-                        type="number"
-                        step="1"
-                        :min="minimumMemoryMiB(pod)"
-                        :max="
-                          pod.resourceScaling
-                            ? Math.floor(pod.resourceScaling.maxMemoryBytes / mebibyte)
-                            : undefined
-                        "
-                        :disabled="resizeBusy[pod.sessionID] || pod.phase === 'Terminating'"
-                        @focus="startResizeEdit(pod.sessionID)"
-                        @input="startResizeEdit(pod.sessionID)"
-                        @blur="finishResizeEdit(pod)"
-                      />
-                    </label>
-                    <button class="primary" type="submit" :disabled="!canResize(pod)">
-                      {{ resizeBusy[pod.sessionID] ? '保存中…' : '手动固定' }}
-                    </button>
-                    <button
-                      v-if="pod.resourceScaling?.mode === 'Manual'"
-                      type="button"
-                      :disabled="resizeBusy[pod.sessionID]"
-                      @click="restoreAuto(pod)"
-                    >
-                      恢复自动调度
-                    </button>
+                  <div v-if="pod.isAgent && pod.resourceScaling" class="resize-form">
                     <span v-if="pod.resourceScaling" class="resize-state">
                       Desired:
                       {{ formatCPU(pod.resourceScaling.desiredResources.cpuMillicores) }} /
                       {{ formatMemory(pod.resourceScaling.desiredResources.memoryBytes) }}
                     </span>
-                    <span
-                      v-if="
-                        pod.resourceScaling?.mode === 'Auto' &&
-                        pod.resourceScaling.recommendedCPUMillicores
-                      "
-                      class="resize-state"
-                    >
+                    <span v-if="pod.resourceScaling.recommendedCPUMillicores" class="resize-state">
                       CPU 推荐:
                       {{ formatCPU(pod.resourceScaling.recommendedCPUMillicores) }}
                     </span>
@@ -507,16 +316,10 @@ onUnmounted(() => {
                     <span v-if="pod.resize" class="resize-state">
                       {{ pod.resize.reason || 'Kubernetes 正在应用新 Limit' }}
                     </span>
-                    <span v-else-if="manualIntentQueued(pod)" class="resize-state">
-                      手动调整已排队
-                    </span>
                     <span v-if="pod.resourceScaling?.lastError" class="resize-error" role="alert">
                       {{ pod.resourceScaling.lastError }}
                     </span>
-                    <span v-if="resizeErrors[pod.sessionID]" class="resize-error" role="alert">
-                      {{ resizeErrors[pod.sessionID] }}
-                    </span>
-                  </form>
+                  </div>
                   <span v-else>—</span>
                 </td>
               </tr>

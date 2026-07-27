@@ -28,16 +28,10 @@ working set，CPU 使用相邻累计计数器按 Summary 中的真实采样时�
 
 - `GET /api/v1/sessions/:id/resources`：需要登录，只允许读取当前用户的会话；
 - `GET /api/v1/admin/cluster`：课程展示用公开接口，返回全局 Node、Pod 与 Agent 所属用户。
-- `PUT /api/v1/admin/sessions/:id/resources`：课程展示用公开接口，将
-  `AgentSession.spec.resourceScaling` 持久化为 Manual intent。请求体为
-  `{"cpuMillicores":700,"memoryBytes":3221225472}`，CPU / memory 必须位于统一资源边界
-  的 hard bounds。
-- `DELETE /api/v1/admin/sessions/:id/resources`：将会话恢复为 Auto 模式并清空 Manual
-  intent。
 
 backend 只在内存中保留每个容器上一次 CPU 累计计数器，不持久化资源历史。集群未提供
 metrics-server 时仍返回 Node、Pod 和资源规格；Kubelet 实时采样完成两次请求后可继续
 提供 Pod CPU/内存，Node 总用量通过 availability 字段标记暂不可用。
-资源 API 返回 Pod desired、container actual、Pod resize condition 和 Auto/Manual
-状态。backend 不直接调用 `pods/resize`；Operator 是唯一资源写入者，且不会修改平台
+资源 API 返回 Pod desired、container actual、Pod resize condition 和自动调度状态。
+backend 不直接调用 `pods/resize`；Operator 是唯一资源写入者，且不会修改平台
 `auth-proxy` sidecar。

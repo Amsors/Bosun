@@ -23,9 +23,8 @@ BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke
 
 CPU limit 自动调整使用独立的串行演示链路。`deploy/local/values-local.yaml` 将采样间隔
 和 cooldown 缩短为课堂演示值；脚本依次验证持续高负载扩容、等待状态低负载缩容、
-Manual CPU/memory 固定、恢复 Auto、metrics-server 暂停时仍可扩容，以及 Agent
-restart count 和 `auth-proxy` resources 不变。脚本结束时会恢复 metrics-server 并删除
-测试会话：
+metrics-server 暂停时仍可扩容，以及 Agent restart count、CPU request/limit 同步和
+`auth-proxy` resources 不变。脚本结束时会恢复 metrics-server 并删除测试会话：
 
 ```bash
 BOSUN_E2E_PASSWORD='<test-only-password>' make dev-autoscaling

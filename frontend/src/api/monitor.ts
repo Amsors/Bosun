@@ -1,10 +1,5 @@
 import { authenticatedRequest, request } from './client'
-import type {
-  ClusterResourceSnapshot,
-  ResizeAgentResourcesRequest,
-  ResourceScalingResponse,
-  SessionResourceSnapshot,
-} from './contracts'
+import type { ClusterResourceSnapshot, SessionResourceSnapshot } from './contracts'
 
 export const monitorApi = {
   session: (token: string, sessionID: string) =>
@@ -12,14 +7,4 @@ export const monitorApi = {
       `/sessions/${encodeURIComponent(sessionID)}/resources`,
     ),
   cluster: () => request<ClusterResourceSnapshot>('/admin/cluster'),
-  resizeAgent: (sessionID: string, resources: ResizeAgentResourcesRequest) =>
-    request<ResourceScalingResponse>(`/admin/sessions/${encodeURIComponent(sessionID)}/resources`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(resources),
-    }),
-  restoreAuto: (sessionID: string) =>
-    request<ResourceScalingResponse>(`/admin/sessions/${encodeURIComponent(sessionID)}/resources`, {
-      method: 'DELETE',
-    }),
 }

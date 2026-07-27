@@ -115,12 +115,9 @@ export interface ContainerResourceSnapshot {
   actualResourcesAvailable: boolean
 }
 
-export type ResourceScalingMode = 'Auto' | 'Manual'
 export type ResourceLoadClass = 'Unknown' | 'WarmingUp' | 'CPUHigh' | 'CPULow' | 'Stable'
 
 export interface AgentResourceScalingSnapshot {
-  mode: ResourceScalingMode
-  manualLimits?: ResourceValues
   desiredResources: ResourceValues
   actualResources: ResourceValues | null
   actualResourcesAvailable: boolean
@@ -129,10 +126,6 @@ export interface AgentResourceScalingSnapshot {
   lastAppliedAt?: RFC3339Timestamp
   lastError?: string
   workState?: string
-  minCPUMillicores: number
-  maxCPUMillicores: number
-  minMemoryBytes: number
-  maxMemoryBytes: number
 }
 
 export interface PodResizeSnapshot {
@@ -186,16 +179,6 @@ export interface ClusterResourceSnapshot {
   nodeMetricsAvailable: boolean
   nodes: NodeResourceSnapshot[]
   pods: PodResourceSnapshot[]
-}
-
-export interface ResizeAgentResourcesRequest {
-  cpuMillicores: number
-  memoryBytes: number
-}
-
-export interface ResourceScalingResponse extends AgentResourceScalingSnapshot {
-  observedAt: RFC3339Timestamp
-  resize: PodResizeSnapshot | null
 }
 
 export interface TerminalFrame {

@@ -38,39 +38,43 @@ import (
 )
 
 const (
-	agentSessionFinalizer  = "bosun.io/agentsession-cleanup"
-	sessionLabel           = "bosun.io/session"
-	sessionReadyCondition  = "Ready"
-	sessionRetryCondition  = "ReconcileRetry"
-	gatewayTokenVolume     = "gateway-token"
-	workspaceVolume        = "workspace"
-	lowPriorityClass       = "bosun-free"
-	normalPriorityClass    = "bosun-normal"
-	highPriorityClass      = "bosun-high"
-	deadlineExceededReason = "DeadlineExceeded"
-	agentWorkingReason     = "AgentWorking"
-	awaitingApprovalReason = "AwaitingApproval"
-	awaitingChoiceReason   = "AwaitingChoice"
-	awaitingInputReason    = "AwaitingInput"
-	maxTransientRetries    = 10
-	defaultIdleScan        = 30 * time.Second
-	maxHibernateGrace      = int64(30)
-	reconcileTimeout       = 30 * time.Second
+	agentSessionFinalizer    = "bosun.io/agentsession-cleanup"
+	sessionLabel             = "bosun.io/session"
+	sessionReadyCondition    = "Ready"
+	sessionRetryCondition    = "ReconcileRetry"
+	schedulingNodeAnnotation = "bosun.io/scheduling-node"
+	gatewayTokenVolume       = "gateway-token"
+	workspaceVolume          = "workspace"
+	agentNodeRoleLabel       = "role"
+	agentNodeRoleValue       = "worker"
+	lowPriorityClass         = "bosun-free"
+	normalPriorityClass      = "bosun-normal"
+	highPriorityClass        = "bosun-high"
+	deadlineExceededReason   = "DeadlineExceeded"
+	agentWorkingReason       = "AgentWorking"
+	awaitingApprovalReason   = "AwaitingApproval"
+	awaitingChoiceReason     = "AwaitingChoice"
+	awaitingInputReason      = "AwaitingInput"
+	maxTransientRetries      = 10
+	defaultIdleScan          = 30 * time.Second
+	maxHibernateGrace        = int64(30)
+	reconcileTimeout         = 30 * time.Second
 )
 
 // AgentSessionReconciler reconciles AgentSession workload and lifecycle state.
 type AgentSessionReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
-	AgentImage       string
-	AgentPullPolicy  corev1.PullPolicy
-	StorageClassName string
-	GatewayURL       string
-	EgressProxyURL   string
-	IdleScanInterval time.Duration
-	Now              func() time.Time
-	Quiescer         AgentQuiescer
-	StateReader      AgentStateReader
+	Scheme                    *runtime.Scheme
+	AgentImage                string
+	AgentPullPolicy           corev1.PullPolicy
+	StorageClassName          string
+	GatewayURL                string
+	EgressProxyURL            string
+	IdleScanInterval          time.Duration
+	CapacitySchedulingEnabled bool
+	Now                       func() time.Time
+	Quiescer                  AgentQuiescer
+	StateReader               AgentStateReader
 }
 
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions,verbs=get;list;watch
@@ -164,6 +168,25 @@ func (r *AgentSessionReconciler) reconcileRunning(
 	}
 	if err := r.ensureServiceAccount(ctx, session); err != nil {
 		return r.handleTransient(ctx, session, err)
+	}
+	if r.CapacitySchedulingEnabled &&
+		session.Status.PodName == "" &&
+		session.Annotations[schedulingNodeAnnotation] == "" {
+		if err := r.setStatus(
+			ctx, key, session.Generation,
+			func(status *bosunv1alpha1.AgentSessionStatus) {
+				status.Phase = bosunv1alpha1.AgentSessionPhasePending
+				status.PVCName = pvc.Name
+				status.ObservedGeneration = session.Generation
+				setSessionCondition(
+					status, session.Generation, metav1.ConditionFalse,
+					"AwaitingCapacity", "Agent session is waiting for a 500m CPU allocation",
+				)
+			},
+		); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.idleScan()}, nil
 	}
 
 	phase := bosunv1alpha1.AgentSessionPhaseProvisioning
@@ -553,13 +576,6 @@ func (r *AgentSessionReconciler) desiredPod(
 	pvcName string,
 ) *corev1.Pod {
 	agentRequests, agentLimits := resourcepolicy.ResourceRequirements()
-	scaling := session.Spec.EffectiveResourceScaling()
-	if scaling.Mode == bosunv1alpha1.ResourceScalingModeManual && scaling.ManualLimits != nil {
-		agentLimits[corev1.ResourceCPU] =
-			*resource.NewMilliQuantity(scaling.ManualLimits.CPUMillicores, resource.DecimalSI)
-		agentLimits[corev1.ResourceMemory] =
-			*resource.NewQuantity(scaling.ManualLimits.MemoryBytes, resource.BinarySI)
-	}
 	runAsUser := int64(10001)
 	runAsGroup := int64(10001)
 	nonRoot := true
@@ -595,7 +611,7 @@ func (r *AgentSessionReconciler) desiredPod(
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
 			},
-			Affinity:    agentAffinity(),
+			Affinity:    agentAffinity(session.Annotations[schedulingNodeAnnotation]),
 			Tolerations: agentTolerations(),
 			Containers: []corev1.Container{
 				{
@@ -689,12 +705,21 @@ func (r *AgentSessionReconciler) desiredPod(
 	}
 }
 
-func agentAffinity() *corev1.Affinity {
+func agentAffinity(nodeName string) *corev1.Affinity {
+	requirements := []corev1.NodeSelectorRequirement{{
+		Key: agentNodeRoleLabel, Operator: corev1.NodeSelectorOpIn,
+		Values: []string{agentNodeRoleValue},
+	}}
+	term := corev1.NodeSelectorTerm{MatchExpressions: requirements}
+	if nodeName != "" {
+		term.MatchFields = []corev1.NodeSelectorRequirement{{
+			Key: "metadata.name", Operator: corev1.NodeSelectorOpIn,
+			Values: []string{nodeName},
+		}}
+	}
 	return &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-			NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{{
-				Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"worker"},
-			}}}},
+			NodeSelectorTerms: []corev1.NodeSelectorTerm{term},
 		},
 	}}
 }
@@ -843,22 +868,6 @@ func validateAgentSession(session *bosunv1alpha1.AgentSession) error {
 		session.Spec.StoragePolicy != bosunv1alpha1.StoragePolicyLocal ||
 		!supportedPriorityClass(session.Spec.PriorityClassName) {
 		return fmt.Errorf("session must use a supported Bosun priority class")
-	}
-	scaling := session.Spec.EffectiveResourceScaling()
-	switch scaling.Mode {
-	case bosunv1alpha1.ResourceScalingModeAuto:
-		if scaling.ManualLimits != nil {
-			return fmt.Errorf("spec.resourceScaling.manualLimits must be empty in Auto mode")
-		}
-	case bosunv1alpha1.ResourceScalingModeManual:
-		if scaling.ManualLimits == nil {
-			return fmt.Errorf("spec.resourceScaling.manualLimits is required in Manual mode")
-		}
-		if err := resourcepolicy.ValidateManualLimits(*scaling.ManualLimits); err != nil {
-			return fmt.Errorf("invalid manual resource limits: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported resource scaling mode %q", scaling.Mode)
 	}
 	return nil
 }

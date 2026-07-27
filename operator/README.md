@@ -12,6 +12,14 @@ CPU 自动扩缩容直接通过 Kubernetes API Server 的 Node proxy 读取 Kube
 millicores；首次采样只建立基线，重复的 Kubelet timestamp 不会形成新决策样本。
 metrics-server 仍供 backend 的 Node 总量监控使用，但不再参与 Operator 的扩缩容决策。
 
+Agent CPU 初始和最低额度为 `500m`，最高为 `3000m`，request 与 limit 始终相等。
+普通、高优先级会话按 2 倍扩容、按二分之一缩容；同节点同优先级通过带需求上限的
+max-min fairness 分配扩容额度。高优先级扩容不足时按比例回收普通优先级的扩容额度，
+低优先级固定为 `500m`。节点容量只按 Allocatable 与节点上全部容器 CPU limit 计算。
+新会话无基础额度时先保持 Pending，Operator 按优先级和稳定顺序选择兼容 worker，
+必要时依次回收普通、高优先级扩容额度，再用 hard node affinity 交给 Kubernetes
+Scheduler 完成绑定。
+
 ## 开发命令
 
 ```bash

@@ -149,7 +149,7 @@ start_stress 90s
 scaled_up="$(
   wait_json 30 5 \
     cluster_snapshot \
-    "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.desiredResources.cpuMillicores > 500 and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores')"
+    "$(scaling_predicate '.resourceScaling.desiredResources.cpuMillicores > 500 and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores')"
 )"
 scaled_cpu="$(
   jq -r --arg session_id "${session_id}" \
@@ -162,35 +162,6 @@ wait_json 36 5 \
   cluster_snapshot \
   "$(scaling_predicate ".resourceScaling.loadClass == \"CPULow\" and .resourceScaling.desiredResources.cpuMillicores < ${scaled_cpu}")" \
   >/dev/null
-
-manual="$(
-  api PUT "/admin/sessions/${session_id}/resources" \
-    -H 'Content-Type: application/json' \
-    --data '{"cpuMillicores":650,"memoryBytes":3221225472}'
-)"
-assert_code_zero <<<"${manual}"
-wait_json 24 5 \
-  cluster_snapshot \
-  "$(scaling_predicate '.resourceScaling.mode == "Manual" and .resourceScaling.actualResources.cpuMillicores == 650 and .resourceScaling.actualResources.memoryBytes == 3221225472')" \
-  >/dev/null
-assert_memory_high "manual"
-
-start_stress 30s
-sleep 20
-manual_cpu="$(
-  cluster_snapshot |
-    jq -r --arg session_id "${session_id}" \
-      '.data.pods[] | select(.sessionID == $session_id) | .resourceScaling.desiredResources.cpuMillicores'
-)"
-stop_stress
-[[ "${manual_cpu}" == "650" ]]
-
-api DELETE "/admin/sessions/${session_id}/resources" | assert_code_zero
-wait_json 24 5 \
-  cluster_snapshot \
-  "$(scaling_predicate '.resourceScaling.mode == "Auto" and .resourceScaling.actualResources.memoryBytes == 3221225472 and (.resourceScaling.loadClass == "WarmingUp" or .resourceScaling.loadClass == "Stable")')" \
-  >/dev/null
-assert_memory_high "restored-auto"
 
 before_metrics_outage="$(
   cluster_snapshot |
@@ -221,7 +192,7 @@ start_stress 45s
 scaled_without_metrics="$(
   wait_json 30 2 \
     cluster_snapshot \
-    "$(scaling_predicate ".resourceScaling.mode == \"Auto\" and .resourceScaling.desiredResources.cpuMillicores > ${before_metrics_outage} and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores")"
+    "$(scaling_predicate ".resourceScaling.desiredResources.cpuMillicores > ${before_metrics_outage} and .resourceScaling.actualResources.cpuMillicores == .resourceScaling.desiredResources.cpuMillicores")"
 )"
 stop_stress
 [[ -n "${scaled_without_metrics}" ]]
@@ -237,8 +208,14 @@ final_sidecar_limits="$(
   kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
     jq -c '.spec.containers[] | select(.name == "auth-proxy") | .resources'
 )"
+agent_cpu_pair="$(
+  kubectl --namespace "${pod_namespace}" get pod "${pod_name}" --output json |
+    jq -r '.spec.containers[] | select(.name == "agent") | [.resources.requests.cpu, .resources.limits.cpu] | @tsv'
+)"
 [[ "${initial_restart_count}" == "${final_restart_count}" ]]
 [[ "${sidecar_limits}" == "${final_sidecar_limits}" ]]
+IFS=$'\t' read -r agent_cpu_request agent_cpu_limit <<<"${agent_cpu_pair}"
+[[ "${agent_cpu_request}" == "${agent_cpu_limit}" ]]
 
 api DELETE "/sessions/${session_id}" \
   -H "Authorization: Bearer ${BOSUN_E2E_ACCESS_TOKEN}" |
