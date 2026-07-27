@@ -54,6 +54,10 @@ func TestValidCreateRequestRequiresUsefulName(t *testing.T) {
 		{name: "blank", edit: func(req *CreateRequest) { req.Name = " \t " }},
 		{name: "too long", edit: func(req *CreateRequest) { req.Name = string(make([]rune, 81)) }},
 		{name: "invalid priority", edit: func(req *CreateRequest) { req.Priority = "urgent" }},
+		{name: "default memory", edit: func(req *CreateRequest) { req.MemoryRequest = "" }, ok: true},
+		{name: "memory below minimum", edit: func(req *CreateRequest) { req.MemoryRequest = "512Mi" }},
+		{name: "memory above maximum", edit: func(req *CreateRequest) { req.MemoryRequest = "65Gi" }},
+		{name: "memory quantity in range", edit: func(req *CreateRequest) { req.MemoryRequest = "4096Mi" }, ok: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,6 +70,39 @@ func TestValidCreateRequestRequiresUsefulName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateDefaultsMemoryRequest(t *testing.T) {
+	userID := mustV7(t)
+	store := newMemoryStore()
+	service := newTestService(
+		t,
+		store,
+		&memoryIdempotency{},
+		environmentPhase("Ready"),
+		newMemoryRuntime(),
+	)
+	req := validRequest()
+	req.MemoryRequest = ""
+	_, err := service.Create(
+		context.Background(),
+		userID,
+		"default-memory",
+		"POST",
+		"/api/v1/sessions",
+		[]byte("default-memory"),
+		req,
+	)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	for _, rec := range store.sessions {
+		if rec.MemoryRequestBytes != 2*1024*1024*1024 {
+			t.Fatalf("memory request = %d, want 2Gi", rec.MemoryRequestBytes)
+		}
+		return
+	}
+	t.Fatal("created session was not persisted")
 }
 
 func TestCreateIdempotentlyPersistsSessionEventAndResponseBeforeCR(t *testing.T) {
@@ -437,7 +474,8 @@ func (m *idempotentMemoryStore) CreateWithEventAndIdempotency(ctx context.Contex
 func validRequest() CreateRequest {
 	return CreateRequest{
 		Name: "测试会话", Priority: "normal", Runtime: "claude-code",
-		Provider: ProviderRequest{Mode: "platform"}, StoragePolicy: "local",
+		MemoryRequest: "2Gi",
+		Provider:      ProviderRequest{Mode: "platform"}, StoragePolicy: "local",
 	}
 }
 
@@ -447,7 +485,8 @@ func testSession(userID uuid.UUID) Session {
 	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
 	return Session{
 		ID: id, UserID: userID, Name: "测试会话", Priority: "normal",
-		CRNamespace: "bosun-u-test", CRName: "sess-test",
+		MemoryRequestBytes: 2 * 1024 * 1024 * 1024,
+		CRNamespace:        "bosun-u-test", CRName: "sess-test",
 		Runtime: "claude-code", Provider: Provider{Mode: "platform"},
 		StoragePolicy: "local", DesiredState: "Running", ResumeNonce: nonce,
 		Phase: "Pending", CreatedAt: now, UpdatedAt: now, Version: 1,

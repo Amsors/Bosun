@@ -28,31 +28,33 @@ type Provider struct {
 }
 
 type Session struct {
-	ID                uuid.UUID
-	UserID            uuid.UUID
-	Name              string
-	Priority          string
-	CRNamespace       string
-	CRName            string
-	Runtime           string
-	Provider          Provider
-	StoragePolicy     string
-	DesiredState      string
-	ResumeNonce       uuid.UUID
-	Phase             string
-	PhaseReason       string
-	Conditions        []metav1.Condition
-	LastActiveAt      *time.Time
-	CRResourceVersion int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DeletedAt         *time.Time
-	Version           int64
+	ID                 uuid.UUID
+	UserID             uuid.UUID
+	Name               string
+	Priority           string
+	MemoryRequestBytes int64
+	CRNamespace        string
+	CRName             string
+	Runtime            string
+	Provider           Provider
+	StoragePolicy      string
+	DesiredState       string
+	ResumeNonce        uuid.UUID
+	Phase              string
+	PhaseReason        string
+	Conditions         []metav1.Condition
+	LastActiveAt       *time.Time
+	CRResourceVersion  int64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	Version            int64
 }
 
 type CreateRequest struct {
 	Name          string          `json:"name"`
 	Priority      string          `json:"priority"`
+	MemoryRequest string          `json:"memoryRequest"`
 	Runtime       string          `json:"runtime"`
 	Provider      ProviderRequest `json:"provider"`
 	StoragePolicy string          `json:"storagePolicy"`

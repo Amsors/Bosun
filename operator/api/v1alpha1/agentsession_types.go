@@ -11,6 +11,7 @@ You may obtain a copy of the License at
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -111,6 +112,10 @@ type AgentSessionSpec struct {
 	// +kubebuilder:validation:Enum=bosun-free;bosun-normal;bosun-high
 	// +kubebuilder:default=bosun-normal
 	PriorityClassName string `json:"priorityClassName"`
+
+	// MemoryRequest is applied to both the Agent container request and limit.
+	// +kubebuilder:default="2Gi"
+	MemoryRequest resource.Quantity `json:"memoryRequest"`
 }
 
 type ArchiveStatus struct {

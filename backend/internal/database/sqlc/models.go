@@ -55,6 +55,7 @@ type BosunSession struct {
 	Version              int64      `json:"version"`
 	DisplayName          string     `json:"display_name"`
 	Priority             string     `json:"priority"`
+	MemoryRequestBytes   int64      `json:"memory_request_bytes"`
 }
 
 type BosunSessionEvent struct {

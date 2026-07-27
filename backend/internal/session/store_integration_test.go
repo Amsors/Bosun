@@ -59,6 +59,9 @@ func TestSessionStoreRepairAndOutOfOrderProjectionIntegration(t *testing.T) {
 	if cr.Spec.PriorityClassName != "bosun-normal" {
 		t.Fatalf("repaired spec.priorityClassName = %q, want bosun-normal", cr.Spec.PriorityClassName)
 	}
+	if cr.Spec.MemoryRequest.String() != "2Gi" {
+		t.Fatalf("repaired spec.memoryRequest = %q, want 2Gi", cr.Spec.MemoryRequest.String())
+	}
 
 	newerEvent, _ := newEvent(rec.ID, "session.phase_changed", map[string]any{}, rec.CreatedAt.Add(time.Second))
 	updated, err := store.Project(ctx, Projection{
@@ -82,6 +85,9 @@ func TestSessionStoreRepairAndOutOfOrderProjectionIntegration(t *testing.T) {
 	}
 	if got.Priority != "normal" {
 		t.Fatalf("projected session priority=%q, want normal", got.Priority)
+	}
+	if got.MemoryRequestBytes != 2*1024*1024*1024 {
+		t.Fatalf("projected memory request=%d, want 2Gi", got.MemoryRequestBytes)
 	}
 }
 

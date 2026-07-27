@@ -81,6 +81,7 @@ export interface ProviderSelection {
 export interface CreateSessionRequest {
   name: string
   priority: SessionPriority
+  memoryRequest: string
   runtime: Runtime
   provider: ProviderSelection
   storagePolicy: StoragePolicy
@@ -90,6 +91,7 @@ export interface Session {
   id: UUID
   name: string
   priority: SessionPriority
+  memoryRequest: string
   desiredState: DesiredState
   runtime: Runtime
   provider: ProviderSelection

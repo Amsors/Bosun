@@ -3,6 +3,7 @@ package session
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -10,6 +11,7 @@ type DTO struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`
 	Priority      string             `json:"priority"`
+	MemoryRequest string             `json:"memoryRequest"`
 	DesiredState  string             `json:"desiredState"`
 	Runtime       string             `json:"runtime"`
 	Provider      ProviderDTO        `json:"provider"`
@@ -37,7 +39,8 @@ func toDTO(rec Session) DTO {
 	}
 	dto := DTO{
 		ID: rec.ID.String(), Name: rec.Name, Priority: rec.Priority,
-		DesiredState: rec.DesiredState, Runtime: rec.Runtime,
+		MemoryRequest: resource.NewQuantity(rec.MemoryRequestBytes, resource.BinarySI).String(),
+		DesiredState:  rec.DesiredState, Runtime: rec.Runtime,
 		Provider: ProviderDTO{Mode: rec.Provider.Mode}, StoragePolicy: rec.StoragePolicy,
 		Phase: rec.Phase, PhaseReason: rec.PhaseReason, Conditions: conditions,
 		CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),

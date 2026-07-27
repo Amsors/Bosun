@@ -12,6 +12,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const name = ref('')
 const priority = ref<SessionPriority>('normal')
+const memoryGiB = ref(2)
 const busy = ref(false)
 const error = ref('')
 const idempotencyKey = globalThis.crypto.randomUUID()
@@ -25,6 +26,7 @@ async function create(): Promise<void> {
       {
         name: name.value.trim(),
         priority: priority.value,
+        memoryRequest: `${memoryGiB.value}Gi`,
         runtime: 'claude-code',
         provider: { mode: 'platform' },
         storagePolicy: 'local',
@@ -103,12 +105,27 @@ async function create(): Promise<void> {
           </div>
           <div class="resource-setting-row">
             <div>
-              <strong>内存</strong>
-              <small>内存创建后保持固定，不参与 CPU 自动调度</small>
+              <label for="memory-request"><strong>内存</strong></label>
+              <small>用于 Kubernetes 调度，创建后保持固定</small>
             </div>
-            <span class="resource-setting-value">request 2 GiB / limit 3 GiB</span>
+            <div class="memory-request-control">
+              <input
+                id="memory-request"
+                v-model.number="memoryGiB"
+                type="number"
+                min="1"
+                max="64"
+                step="1"
+                required
+                aria-describedby="memory-request-help"
+              />
+              <span>GiB</span>
+            </div>
           </div>
-          <p class="field-help">所有会话使用统一资源配置，不再区分规格档位。</p>
+          <p id="memory-request-help" class="field-help">
+            Agent 容器的 memory request 与 limit
+            均设为该值；可利用不同节点的可用内存间接控制调度位置。
+          </p>
         </fieldset>
         <p v-if="error" class="alert" role="alert">{{ error }}</p>
         <button class="primary" type="submit" :disabled="busy">

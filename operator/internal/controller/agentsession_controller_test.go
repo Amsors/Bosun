@@ -184,6 +184,10 @@ func assertAgentSessionPodReconcileIsIdempotent(
 
 func TestAgentSessionUsesUnifiedResourceBudget(t *testing.T) {
 	session := createAgentSession(t, "018f9c6e-1234-7000-8000-abcdef012407", "018f9c6e-1234-7000-8000-abcdef012507")
+	session.Spec.MemoryRequest = resource.MustParse("7Gi")
+	if err := testClient.Update(context.Background(), session); err != nil {
+		t.Fatalf("set memory request: %v", err)
+	}
 	reconciler := newAgentSessionReconciler()
 	reconcileAgentSession(t, reconciler, session, 4)
 	var pvc corev1.PersistentVolumeClaim
@@ -195,9 +199,9 @@ func TestAgentSessionUsesUnifiedResourceBudget(t *testing.T) {
 	var pod corev1.Pod
 	getObject(t, namespacedName(session.Namespace, sessionidentity.PodName(session.Spec.SessionID)), &pod)
 	if pod.Spec.Containers[0].Resources.Requests.Cpu().Cmp(resource.MustParse("500m")) != 0 ||
-		pod.Spec.Containers[0].Resources.Requests.Memory().Cmp(resource.MustParse("2Gi")) != 0 ||
+		pod.Spec.Containers[0].Resources.Requests.Memory().Cmp(resource.MustParse("7Gi")) != 0 ||
 		pod.Spec.Containers[0].Resources.Limits.Cpu().Cmp(resource.MustParse("500m")) != 0 ||
-		pod.Spec.Containers[0].Resources.Limits.Memory().Cmp(resource.MustParse("3Gi")) != 0 {
+		pod.Spec.Containers[0].Resources.Limits.Memory().Cmp(resource.MustParse("7Gi")) != 0 {
 		t.Fatalf("agent resources = %#v", pod.Spec.Containers[0].Resources)
 	}
 }
@@ -522,6 +526,7 @@ func createAgentSession(t *testing.T, sessionID, userID string) *bosunv1alpha1.A
 			Provider:      bosunv1alpha1.ProviderSpec{Mode: bosunv1alpha1.ProviderModePlatform},
 			StoragePolicy: bosunv1alpha1.StoragePolicyLocal, IdleTimeoutSeconds: 1800,
 			ActiveDeadlineSeconds: 28800, PriorityClassName: normalPriorityClass,
+			MemoryRequest: resource.MustParse("2Gi"),
 		},
 	}
 	if err := testClient.Create(ctx, session); err != nil {

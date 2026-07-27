@@ -575,7 +575,7 @@ func (r *AgentSessionReconciler) desiredPod(
 	session *bosunv1alpha1.AgentSession,
 	pvcName string,
 ) *corev1.Pod {
-	agentRequests, agentLimits := resourcepolicy.ResourceRequirements()
+	agentRequests, agentLimits := resourcepolicy.ResourceRequirements(session.Spec.MemoryRequest.Value())
 	runAsUser := int64(10001)
 	runAsGroup := int64(10001)
 	nonRoot := true
@@ -868,6 +868,12 @@ func validateAgentSession(session *bosunv1alpha1.AgentSession) error {
 		session.Spec.StoragePolicy != bosunv1alpha1.StoragePolicyLocal ||
 		!supportedPriorityClass(session.Spec.PriorityClassName) {
 		return fmt.Errorf("session must use a supported Bosun priority class")
+	}
+	memoryRequest := session.Spec.MemoryRequest.Value()
+	policy := resourcepolicy.Policy()
+	if memoryRequest < policy.MinMemoryRequestBytes ||
+		memoryRequest > policy.MaxMemoryRequestBytes {
+		return fmt.Errorf("spec.memoryRequest must be between 1Gi and 64Gi")
 	}
 	return nil
 }
