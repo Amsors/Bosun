@@ -27,6 +27,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes/proxy
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
   - pods
   - serviceaccounts
@@ -75,13 +81,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - metrics.k8s.io
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
 - apiGroups:
   - networking.k8s.io
   resources:

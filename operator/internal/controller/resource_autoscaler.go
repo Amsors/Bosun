@@ -73,13 +73,13 @@ type ResourceAutoscaler struct {
 // +kubebuilder:rbac:groups=bosun.io,resources=agentsessions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/resize,verbs=update
-// +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods,verbs=get;list
+// +kubebuilder:rbac:groups="",resources=nodes/proxy,verbs=get
 
 // Start runs one reconciliation immediately and then at the configured interval.
 func (r *ResourceAutoscaler) Start(ctx context.Context) error {
 	if r.Client == nil || r.Resizer == nil || r.Metrics == nil {
 		return fmt.Errorf(
-			"resource autoscaler requires Kubernetes client, Pod resizer, and PodMetrics reader",
+			"resource autoscaler requires Kubernetes client, Pod resizer, and Kubelet metrics reader",
 		)
 	}
 	interval := r.SampleInterval
@@ -105,6 +105,7 @@ func (r *ResourceAutoscaler) runOnce(ctx context.Context) {
 		logf.FromContext(ctx).Error(err, "Could not list AgentSessions for resource scaling")
 		return
 	}
+	r.Metrics.BeginCycle()
 	seen := make(map[types.UID]struct{}, len(sessions.Items))
 	for i := range sessions.Items {
 		session := &sessions.Items[i]
@@ -161,7 +162,7 @@ func (r *ResourceAutoscaler) reconcileSession(
 	policy := resourcepolicy.Policy()
 	if scaling.Mode == bosunv1alpha1.ResourceScalingModeAuto {
 		window := r.window(session.UID)
-		if window.Prepare(pod.UID, session.Generation) {
+		if window.Prepare(agentMetricIdentity(&pod), session.Generation) {
 			r.clearFailedAttempt(session.UID)
 		}
 	}
@@ -247,7 +248,7 @@ func (r *ResourceAutoscaler) reconcileAutoCPU(
 			true,
 		)
 	}
-	metric, err := r.Metrics.GetAgentPodMetric(ctx, pod.Namespace, pod.Name)
+	metric, ready, err := r.Metrics.GetAgentPodMetric(ctx, pod)
 	if err != nil {
 		return r.updateAutoStatus(
 			ctx,
@@ -255,25 +256,33 @@ func (r *ResourceAutoscaler) reconcileAutoCPU(
 			session.UID,
 			bosunv1alpha1.ResourceLoadClassUnknown,
 			0,
-			fmt.Sprintf("read PodMetrics: %v", err),
+			fmt.Sprintf("read Kubelet metrics: %v", err),
 			true,
+		)
+	}
+	if !ready {
+		loadClass, target := resourcepolicy.Recommendation(
+			window.Samples(), actual.Limits.Cpu().MilliValue(), policy,
+		)
+		return r.updateAutoStatus(
+			ctx, key, session.UID, loadClass, target, "", false,
 		)
 	}
 	now := r.now()
 	if metric.Timestamp.IsZero() {
 		return r.updateAutoStatus(
 			ctx, key, session.UID, bosunv1alpha1.ResourceLoadClassUnknown, 0,
-			"PodMetrics timestamp is unavailable", true,
+			"Kubelet metric timestamp is unavailable", true,
 		)
 	}
 	if now.Sub(metric.Timestamp) > resourcepolicy.MetricsMaxAge {
 		return r.updateAutoStatus(
 			ctx, key, session.UID, bosunv1alpha1.ResourceLoadClassUnknown, 0,
-			fmt.Sprintf("PodMetrics is older than %s", resourcepolicy.MetricsMaxAge), true,
+			fmt.Sprintf("Kubelet metric is older than %s", resourcepolicy.MetricsMaxAge), true,
 		)
 	}
 	window.Add(resourcepolicy.ResourceSample{
-		PodUID:         pod.UID,
+		PodUID:         agentMetricIdentity(pod),
 		ObservedAt:     metric.Timestamp,
 		MetricWindow:   metric.Window,
 		CPUUsage:       metric.CPUUsageMillicores,

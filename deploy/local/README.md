@@ -64,7 +64,7 @@ make dev-down
 | `make dev-deploy` | 用当前镜像 tag 重新 `helm upgrade` 并重启 gateway，不重新构建镜像。 | 集群须已存在，需 provider 环境变量。适用于只改了 chart/values 或想重新注入 provider 配置的场景。 |
 | `make dev-forward` | 前台把 `http://127.0.0.1:18080` 转发到 frontend Service，转发因集群重建等原因退出时每 2 秒自动重试并打印重试次数，`Ctrl-C` 结束；frontend 容器继续经集群 Service 代理 `/api/`。 | 启动时集群须运行中。 |
 | `make dev-smoke` | 临时转发 frontend 并依次运行 smoke A/B（注册登录 → 创建 session → 等待 `Running` → 删除并校验 Pod、PVC、CR 清理），结束后自动收回转发。 | 需 `BOSUN_E2E_PASSWORD`，即 `BOSUN_E2E_PASSWORD='<test-only-password>' make dev-smoke`。 |
-| `make dev-autoscaling` | 运行 CPU 自动扩缩容、Manual/Auto 切换和 metrics 不可用的串行演示链路；结束时恢复 metrics-server 并删除测试会话。 | 需先完成本地部署，并设置 `BOSUN_E2E_PASSWORD`。 |
+| `make dev-autoscaling` | 运行 CPU 自动扩缩容、Manual/Auto 切换和 metrics-server 停止时仍可扩容的串行演示链路；结束时恢复 metrics-server 并删除测试会话。 | 需先完成本地部署，并设置 `BOSUN_E2E_PASSWORD`。 |
 | `make dev-reset` | 先确保节点依赖已缓存到宿主机 Docker，再删除并重建名为 `bosun` 的集群、导入依赖并重新部署；保留 Registry 镜像缓存。 | 需 provider 环境变量。首次缓存失败时不会删除现有集群；用于集群状态脏了又想省去重新拉镜像。 |
 | `make dev-down` | 删除 `bosun` 集群与本地 Registry，回到干净状态。 | 破坏性，不需要 provider 环境变量。 |
 

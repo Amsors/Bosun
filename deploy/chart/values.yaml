@@ -15,9 +15,9 @@ agent:
 
 resourceAutoscaling:
   enabled: true
-  sampleInterval: 3s
+  sampleInterval: 2s
   scaleUpCooldown: 3s
-  scaleDownCooldown: 30s
+  scaleDownCooldown: 10s
 
 api:
   terminal:
