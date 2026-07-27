@@ -591,6 +591,18 @@ legend {
   font-weight: 800;
   white-space: nowrap;
 }
+.resource-setting-row > .memory-request-control {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.5rem;
+  color: #315d20;
+  font-weight: 800;
+}
+.memory-request-control input {
+  width: 6rem;
+  padding: 0.55rem 0.65rem;
+}
 .resource-settings .field-help {
   margin: 0.25rem 0 0;
 }

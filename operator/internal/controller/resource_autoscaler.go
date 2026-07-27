@@ -25,6 +25,7 @@ import (
 const (
 	defaultResourceSampleInterval = 15 * time.Second
 	defaultResizeRetryInterval    = time.Minute
+	authProxyMemoryRequestBytes   = int64(16 * 1024 * 1024)
 )
 
 // PodResizer applies desired resources through the Pod resize subresource.
@@ -183,6 +184,7 @@ func (r *ResourceAutoscaler) runOnce(ctx context.Context) {
 type nodeReservationCandidate struct {
 	node        *corev1.Node
 	free        int64
+	freeMemory  int64
 	reclaimable int64
 }
 
@@ -200,6 +202,7 @@ func (r *ResourceAutoscaler) reserveWaitingSession(
 		}
 	}
 	reservedCPU := pendingReservationCPU(sessions, pods)
+	reservedMemory := pendingReservationMemory(sessions, pods)
 	waiting := make([]*bosunv1alpha1.AgentSession, 0)
 	for i := range sessions {
 		session := &sessions[i]
@@ -232,6 +235,8 @@ func (r *ResourceAutoscaler) reserveWaitingSession(
 	if len(waiting) == 0 {
 		return
 	}
+	session := waiting[0]
+	requiredMemory := sessionMemoryReservation(session)
 
 	candidates := make([]nodeReservationCandidate, 0, len(nodes))
 	for i := range nodes {
@@ -250,15 +255,17 @@ func (r *ResourceAutoscaler) reserveWaitingSession(
 			continue
 		}
 		free := max(nodeFreeCPU(node, pods)-reservedCPU[node.Name], 0)
+		freeMemory := max(nodeFreeMemory(node, pods)-reservedMemory[node.Name], 0)
 		reclaimable := int64(0)
 		for _, state := range byNode[node.Name] {
 			if state.priority > 1 {
 				reclaimable += max(state.current-agentBaseCPUMillicores, 0)
 			}
 		}
-		if free+reclaimable >= agentBaseCPUMillicores {
+		if free+reclaimable >= agentBaseCPUMillicores &&
+			freeMemory >= requiredMemory {
 			candidates = append(candidates, nodeReservationCandidate{
-				node: node, free: free, reclaimable: reclaimable,
+				node: node, free: free, freeMemory: freeMemory, reclaimable: reclaimable,
 			})
 		}
 	}
@@ -273,6 +280,12 @@ func (r *ResourceAutoscaler) reserveWaitingSession(
 		if order := cmp.Compare(rightRemaining, leftRemaining); order != 0 {
 			return order
 		}
+		if order := cmp.Compare(
+			left.freeMemory-requiredMemory,
+			right.freeMemory-requiredMemory,
+		); order != 0 {
+			return order
+		}
 		return cmp.Compare(left.node.Name, right.node.Name)
 	})
 	if len(candidates) == 0 {
@@ -285,7 +298,6 @@ func (r *ResourceAutoscaler) reserveWaitingSession(
 	) {
 		return
 	}
-	session := waiting[0]
 	original := session.DeepCopy()
 	if session.Annotations == nil {
 		session.Annotations = map[string]string{}
@@ -325,6 +337,38 @@ func pendingReservationCPU(
 		}
 	}
 	return reserved
+}
+
+func pendingReservationMemory(
+	sessions []bosunv1alpha1.AgentSession,
+	pods []corev1.Pod,
+) map[string]int64 {
+	scheduled := make(map[string]struct{}, len(pods))
+	for i := range pods {
+		if pods[i].Spec.NodeName == "" {
+			continue
+		}
+		if sessionID := pods[i].Labels[sessionLabel]; sessionID != "" {
+			scheduled[sessionID] = struct{}{}
+		}
+	}
+	reserved := make(map[string]int64)
+	for i := range sessions {
+		session := &sessions[i]
+		nodeName := session.Annotations[schedulingNodeAnnotation]
+		if nodeName == "" || !session.DeletionTimestamp.IsZero() ||
+			session.Spec.DesiredState != bosunv1alpha1.DesiredStateRunning {
+			continue
+		}
+		if _, exists := scheduled[session.Spec.SessionID]; !exists {
+			reserved[nodeName] += sessionMemoryReservation(session)
+		}
+	}
+	return reserved
+}
+
+func sessionMemoryReservation(session *bosunv1alpha1.AgentSession) int64 {
+	return session.Spec.MemoryRequest.Value() + authProxyMemoryRequestBytes
 }
 
 func (r *ResourceAutoscaler) reclaimForReservation(
@@ -465,6 +509,7 @@ func (r *ResourceAutoscaler) observeSession(
 		)
 	}
 	policy := resourcepolicy.Policy()
+	memoryRequest := session.Spec.MemoryRequest.Value()
 	current := agent.Resources.Limits.Cpu().MilliValue()
 	if current <= 0 {
 		current = policy.MinCPULimit
@@ -475,7 +520,8 @@ func (r *ResourceAutoscaler) observeSession(
 		priority: priorityRank(session.Spec.PriorityClassName),
 		current:  current, target: current, demand: current,
 		needsSync: agent.Resources.Requests.Cpu().MilliValue() != current ||
-			agent.Resources.Limits.Memory().Value() != policy.DefaultMemoryLimitBytes,
+			agent.Resources.Requests.Memory().Value() != memoryRequest ||
+			agent.Resources.Limits.Memory().Value() != memoryRequest,
 	}
 	window := r.window(session.UID)
 	if window.Prepare(agentMetricIdentity(pod), session.Generation) {
@@ -673,9 +719,10 @@ func (r *ResourceAutoscaler) resizeState(
 	state *autoscaleSession,
 ) (bool, error) {
 	policy := resourcepolicy.Policy()
+	memoryRequest := state.session.Spec.MemoryRequest.Value()
 	target := min(max(state.target, policy.MinCPULimit), policy.MaxCPULimit)
 	intent := failedResizeIntent{
-		PodUID: state.pod.UID, CPU: target, Memory: policy.DefaultMemoryLimitBytes,
+		PodUID: state.pod.UID, CPU: target, Memory: memoryRequest,
 	}
 	if r.retrySuppressed(state.session.UID, intent) {
 		return false, nil
@@ -714,7 +761,9 @@ func (r *ResourceAutoscaler) resizeState(
 	agent.Resources.Requests[corev1.ResourceCPU] =
 		*resource.NewMilliQuantity(target, resource.DecimalSI)
 	agent.Resources.Limits[corev1.ResourceMemory] =
-		*resource.NewQuantity(policy.DefaultMemoryLimitBytes, resource.BinarySI)
+		state.session.Spec.MemoryRequest.DeepCopy()
+	agent.Resources.Requests[corev1.ResourceMemory] =
+		state.session.Spec.MemoryRequest.DeepCopy()
 	if _, err := r.Resizer.UpdateResize(ctx, &latestPod); err != nil {
 		intent.AttemptedAt = r.now()
 		r.recordFailedAttempt(state.session.UID, intent)
@@ -779,6 +828,39 @@ func nodeFreeCPU(node *corev1.Node, pods []corev1.Pod) int64 {
 		used += podCPULimits(pod)
 	}
 	return max(node.Status.Allocatable.Cpu().MilliValue()-used, 0)
+}
+
+func nodeFreeMemory(node *corev1.Node, pods []corev1.Pod) int64 {
+	used := int64(0)
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Spec.NodeName != node.Name ||
+			pod.Status.Phase == corev1.PodSucceeded ||
+			pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		used += podMemoryRequests(pod)
+	}
+	return max(node.Status.Allocatable.Memory().Value()-used, 0)
+}
+
+func podMemoryRequests(pod *corev1.Pod) int64 {
+	appRequests := int64(0)
+	for i := range pod.Spec.Containers {
+		appRequests += pod.Spec.Containers[i].Resources.Requests.Memory().Value()
+	}
+	initRequest := int64(0)
+	for i := range pod.Spec.InitContainers {
+		initRequest = max(
+			initRequest,
+			pod.Spec.InitContainers[i].Resources.Requests.Memory().Value(),
+		)
+	}
+	effective := max(appRequests, initRequest)
+	if pod.Spec.Overhead != nil {
+		effective += pod.Spec.Overhead.Memory().Value()
+	}
+	return effective
 }
 
 func podCPULimits(pod *corev1.Pod) int64 {

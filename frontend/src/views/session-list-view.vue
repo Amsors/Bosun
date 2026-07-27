@@ -330,7 +330,7 @@ onUnmounted(() => {
             :direction="cpuResources[session.id].direction"
           />
           <div class="session-card-meta">
-            <span>CPU 0.5 核起 · 内存 2 GiB / 3 GiB</span>
+            <span>CPU 0.5 核起 · 内存 request/limit {{ session.memoryRequest }}</span>
             <span>{{ priorityLabel(session.priority) }}</span>
             <span>{{ relativeTime(session.lastActiveAt || session.createdAt) }}</span>
             <span class="mono">#{{ session.id.slice(0, 8) }}</span>

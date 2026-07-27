@@ -37,6 +37,9 @@ make dev-forward
 Kubernetes resize condition、CPU load class、CPU recommendation 和最近应用时间。
 资源由 Operator 按优先级和节点容量自动调度，该页面按课程展示需求无需登录。
 
+创建会话时可指定 1–64 GiB 的 Agent memory request。Operator 会将 Agent 容器的
+memory limit 设为相同值，并在容量预留时排除内存不足的 worker，便于课堂展示异构节点调度。
+
 1 秒刷新配合本地 Kubelet 1 秒 cAdvisor housekeeping，可通过 Kubelet Summary API
 显示 `usageNanoCores` 提供的秒级负载；页面分别展示 API 查询时间与指标采样时间，并只在
 真实采样时间变化时追加图表点。实时源不可用时自动显示 metrics-server 回退数据。

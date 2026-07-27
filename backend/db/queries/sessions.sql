@@ -1,11 +1,11 @@
 -- name: CreateSession :one
 INSERT INTO bosun.sessions (
-    id, user_id, cr_namespace, cr_name, display_name, priority, runtime, provider_mode,
+    id, user_id, cr_namespace, cr_name, display_name, priority, memory_request_bytes, runtime, provider_mode,
     provider_credential_id, storage_policy, desired_state, resume_nonce,
     phase, phase_reason, conditions, last_active_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-    $12, $13, $14, $15, $16, $17, $17
+    $12, $13, $14, $15, $16, $17, $18, $18
 )
 RETURNING *;
 

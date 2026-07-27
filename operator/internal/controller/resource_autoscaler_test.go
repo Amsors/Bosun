@@ -80,7 +80,7 @@ func TestResourceAutoscalerDoublesCPUAndSynchronizesRequestAndLimit(t *testing.T
 		t.Fatalf("agent resources = %#v, want request=limit=1000m", agent.Resources)
 	}
 	if agent.Resources.Requests.Memory().Value() != 2*1024*1024*1024 ||
-		agent.Resources.Limits.Memory().Value() != 3*1024*1024*1024 {
+		agent.Resources.Limits.Memory().Value() != 2*1024*1024*1024 {
 		t.Fatalf("agent memory changed = %#v", agent.Resources)
 	}
 	if findPodContainer(resizer.pod, "auth-proxy").Resources.Limits.Cpu().MilliValue() != 50 {
@@ -217,6 +217,32 @@ func TestNodeFreeCPUIgnoresTerminalPods(t *testing.T) {
 	}
 }
 
+func TestNodeFreeMemoryUsesEffectivePodRequests(t *testing.T) {
+	node := readyWorkerNode(testWorkerNodeName, "2")
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{
+			NodeName: testWorkerNodeName,
+			Containers: []corev1.Container{
+				{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}}},
+				{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("16Mi"),
+				}}},
+			},
+			InitContainers: []corev1.Container{
+				{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("3Gi"),
+				}}},
+			},
+		},
+	}
+	want := resource.MustParse("5Gi")
+	if got := nodeFreeMemory(&node, []corev1.Pod{pod}); got != want.Value() {
+		t.Fatalf("nodeFreeMemory() = %d, want %d", got, want.Value())
+	}
+}
+
 func TestPendingReservationUsesPriorityOrderAndStableNodeChoice(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
@@ -281,6 +307,35 @@ func TestPendingReservationPreservesExistingBaseWhenCapacityIsInsufficient(t *te
 	}
 }
 
+func TestPendingReservationUsesMemoryRequestToChooseEligibleNode(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := bosunv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	session := waitingSession("large", normalPriorityClass, time.Unix(1, 0))
+	session.Spec.MemoryRequest = resource.MustParse("6Gi")
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(session).Build()
+	small := readyWorkerNode("worker-a-small", "2")
+	small.Status.Allocatable[corev1.ResourceMemory] = resource.MustParse("4Gi")
+	large := readyWorkerNode("worker-z-large", "2")
+	large.Status.Allocatable[corev1.ResourceMemory] = resource.MustParse("8Gi")
+	autoscaler := &ResourceAutoscaler{Client: k8s, Resizer: &fakePodResizer{}}
+	autoscaler.reserveWaitingSession(
+		context.Background(),
+		[]bosunv1alpha1.AgentSession{*session},
+		nil,
+		[]corev1.Node{small, large},
+		nil,
+	)
+	var current bosunv1alpha1.AgentSession
+	if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(session), &current); err != nil {
+		t.Fatal(err)
+	}
+	if got := current.Annotations[schedulingNodeAnnotation]; got != "worker-z-large" {
+		t.Fatalf("memory-aware reservation = %q, want worker-z-large", got)
+	}
+}
+
 func TestPendingReservationIsExcludedFromAutoscalingFreeCPU(t *testing.T) {
 	session := waitingSession("reserved", normalPriorityClass, time.Unix(1, 0))
 	session.Annotations = map[string]string{schedulingNodeAnnotation: testWorkerNodeName}
@@ -292,6 +347,17 @@ func TestPendingReservationIsExcludedFromAutoscalingFreeCPU(t *testing.T) {
 		t.Fatalf(
 			"reserved CPU = %dm, want %dm",
 			reserved[testWorkerNodeName], agentBaseCPUMillicores,
+		)
+	}
+	reservedMemory := pendingReservationMemory(
+		[]bosunv1alpha1.AgentSession{*session},
+		nil,
+	)
+	wantMemory := int64(2*1024*1024*1024) + authProxyMemoryRequestBytes
+	if reservedMemory[testWorkerNodeName] != wantMemory {
+		t.Fatalf(
+			"reserved memory = %d, want %d",
+			reservedMemory[testWorkerNodeName], wantMemory,
 		)
 	}
 }
@@ -308,7 +374,7 @@ func waitingSession(
 		},
 		Spec: bosunv1alpha1.AgentSessionSpec{
 			SessionID: name, DesiredState: bosunv1alpha1.DesiredStateRunning,
-			PriorityClassName: priority,
+			PriorityClassName: priority, MemoryRequest: resource.MustParse("2Gi"),
 		},
 		Status: bosunv1alpha1.AgentSessionStatus{
 			Phase: bosunv1alpha1.AgentSessionPhasePending,
@@ -325,7 +391,8 @@ func readyWorkerNode(name, cpu string) corev1.Node {
 		},
 		Status: corev1.NodeStatus{
 			Allocatable: corev1.ResourceList{
-				corev1.ResourceCPU: resource.MustParse(cpu),
+				corev1.ResourceCPU:    resource.MustParse(cpu),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
 			},
 			Conditions: []corev1.NodeCondition{{
 				Type: corev1.NodeReady, Status: corev1.ConditionTrue,
@@ -344,6 +411,7 @@ func resourceScalingSession(priority string) *bosunv1alpha1.AgentSession {
 			SessionID:         "018f9c6e-1234-7000-8000-abcdef012501",
 			DesiredState:      bosunv1alpha1.DesiredStateRunning,
 			PriorityClassName: priority,
+			MemoryRequest:     resource.MustParse("2Gi"),
 		},
 		Status: bosunv1alpha1.AgentSessionStatus{
 			Phase: bosunv1alpha1.AgentSessionPhaseRunning,
@@ -372,7 +440,7 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 					},
 					Limits: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("500m"),
-						corev1.ResourceMemory: resource.MustParse("3Gi"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 				},
 			},
@@ -397,7 +465,7 @@ func resourceScalingPod(session *bosunv1alpha1.AgentSession) *corev1.Pod {
 					},
 					Limits: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("500m"),
-						corev1.ResourceMemory: resource.MustParse("3Gi"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 				},
 			}},

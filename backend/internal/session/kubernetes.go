@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -176,6 +177,7 @@ func agentSessionFromDomain(session Session) *bosunv1alpha1.AgentSession {
 				Mode: bosunv1alpha1.ProviderMode(session.Provider.Mode),
 			},
 			StoragePolicy:         bosunv1alpha1.StoragePolicy(session.StoragePolicy),
+			MemoryRequest:         *resource.NewQuantity(session.MemoryRequestBytes, resource.BinarySI),
 			IdleTimeoutSeconds:    1800,
 			ActiveDeadlineSeconds: 28800,
 			PriorityClassName:     priorityClassName(session.Priority),

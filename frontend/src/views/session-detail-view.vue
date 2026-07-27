@@ -111,7 +111,7 @@ onUnmounted(() => poller && globalThis.clearInterval(poller))
         <div>
           <p class="eyebrow">SESSION</p>
           <h1>{{ session.name }}</h1>
-          <p>{{ session.runtime }} · 统一资源配置</p>
+          <p>{{ session.runtime }} · 内存 request/limit {{ session.memoryRequest }}</p>
           <p class="mono">{{ session.id }}</p>
         </div>
         <span class="phase" :data-phase="session.phase" :data-user-state="userStatus.kind">{{

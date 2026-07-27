@@ -24,14 +24,18 @@ func TestSessionRoutesCreateListTransitionsAndDestructiveDelete(t *testing.T) {
 		"Idempotency-Key": "session-key",
 	}
 	create := doJSON(t, router, http.MethodPost, "/api/v1/sessions",
-		`{"name":"课程项目","priority":"high","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}`,
+		`{"name":"课程项目","priority":"high","memoryRequest":"4Gi","runtime":"claude-code","provider":{"mode":"platform"},"storagePolicy":"local"}`,
 		headers,
 	)
 	if create.Code != http.StatusAccepted {
 		t.Fatalf("create status=%d body=%s", create.Code, create.Body.String())
 	}
-	if fake.userID != userID || fake.createKey != "session-key" {
-		t.Fatalf("create identity/key = %s/%q", fake.userID, fake.createKey)
+	if fake.userID != userID || fake.createKey != "session-key" ||
+		fake.createRequest.MemoryRequest != "4Gi" {
+		t.Fatalf(
+			"create identity/key/memory = %s/%q/%q",
+			fake.userID, fake.createKey, fake.createRequest.MemoryRequest,
+		)
 	}
 
 	list := doJSON(t, router, http.MethodGet, "/api/v1/sessions?page=2&page_size=25", "", map[string]string{
@@ -83,12 +87,13 @@ func TestSessionRoutesValidateIdempotencyPaginationAndOwnershipShape(t *testing.
 }
 
 type fakeSessionService struct {
-	rec       session.Session
-	userID    uuid.UUID
-	createKey string
-	page      int32
-	pageSize  int32
-	action    session.Action
+	rec           session.Session
+	userID        uuid.UUID
+	createKey     string
+	createRequest session.CreateRequest
+	page          int32
+	pageSize      int32
+	action        session.Action
 }
 
 func (f *fakeSessionService) ensureRecord(userID uuid.UUID) session.Session {
@@ -97,8 +102,9 @@ func (f *fakeSessionService) ensureRecord(userID uuid.UUID) session.Session {
 		nonce, _ := uuid.NewV7()
 		f.rec = session.Session{
 			ID: id, UserID: userID, Name: "课程项目", Priority: "high",
-			Runtime:  "claude-code",
-			Provider: session.Provider{Mode: "platform"}, StoragePolicy: "local",
+			MemoryRequestBytes: 4 * 1024 * 1024 * 1024,
+			Runtime:            "claude-code",
+			Provider:           session.Provider{Mode: "platform"}, StoragePolicy: "local",
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
 			Conditions: nil, CreatedAt: time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC),
 		}
@@ -111,10 +117,11 @@ func (f *fakeSessionService) Create(
 	userID uuid.UUID,
 	key, _, _ string,
 	_ []byte,
-	_ session.CreateRequest,
+	req session.CreateRequest,
 ) (session.CreateOutput, error) {
 	f.userID = userID
 	f.createKey = key
+	f.createRequest = req
 	rec := f.ensureRecord(userID)
 	body, _ := json.Marshal(map[string]any{"code": 0, "message": "ok", "data": session.ToDTO(rec)})
 	return session.CreateOutput{Status: http.StatusAccepted, Body: body}, nil

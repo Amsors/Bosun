@@ -21,6 +21,7 @@ describe('session API', () => {
       {
         name: '课程项目',
         priority: 'high',
+        memoryRequest: '4Gi',
         runtime: 'claude-code',
         provider: { mode: 'platform' },
         storagePolicy: 'local',
@@ -32,6 +33,14 @@ describe('session API', () => {
       '/api/v1/sessions',
       expect.objectContaining({
         method: 'POST',
+        body: JSON.stringify({
+          name: '课程项目',
+          priority: 'high',
+          memoryRequest: '4Gi',
+          runtime: 'claude-code',
+          provider: { mode: 'platform' },
+          storagePolicy: 'local',
+        }),
         headers: expect.objectContaining({
           Authorization: 'Bearer access',
           'Idempotency-Key': 'create-key',

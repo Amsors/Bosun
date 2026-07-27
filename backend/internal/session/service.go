@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/Amsors/Bosun/backend/internal/auth"
 	"github.com/Amsors/Bosun/backend/internal/idempotency"
@@ -48,6 +49,12 @@ type CreateOutput struct {
 }
 
 const serviceOperationTimeout = 15 * time.Second
+
+var (
+	defaultMemoryRequest = resource.MustParse("2Gi")
+	minMemoryRequest     = resource.MustParse("1Gi")
+	maxMemoryRequest     = resource.MustParse("64Gi")
+)
 
 func NewService(cfg ServiceConfig) (*Service, error) {
 	if cfg.Store == nil || cfg.Idempotency == nil || cfg.Environment == nil || cfg.Runtime == nil {
@@ -123,10 +130,12 @@ func (s *Service) Create(
 		}
 		now := s.now()
 		name := strings.TrimSpace(req.Name)
+		memoryRequest, _ := parseMemoryRequest(req.MemoryRequest)
 		rec := Session{
 			ID: sessionID, UserID: userID, Name: name, Priority: req.Priority,
-			CRNamespace: userenv.Namespace(userID.String()),
-			CRName:      sessionidentity.CRName(sessionID.String()), Runtime: req.Runtime,
+			MemoryRequestBytes: memoryRequest.Value(),
+			CRNamespace:        userenv.Namespace(userID.String()),
+			CRName:             sessionidentity.CRName(sessionID.String()), Runtime: req.Runtime,
 			Provider: Provider{Mode: req.Provider.Mode}, StoragePolicy: req.StoragePolicy,
 			DesiredState: "Running", ResumeNonce: nonce, Phase: "Pending",
 			PhaseReason: "CreateRequested", Conditions: nil, LastActiveAt: &now,
@@ -138,7 +147,8 @@ func (s *Service) Create(
 		}
 		event, err := newEvent(rec.ID, "session.created", map[string]any{
 			"name": rec.Name, "priority": rec.Priority,
-			"runtime": rec.Runtime, "storagePolicy": rec.StoragePolicy,
+			"memoryRequest": memoryRequest.String(),
+			"runtime":       rec.Runtime, "storagePolicy": rec.StoragePolicy,
 		}, now)
 		if err != nil {
 			return err
@@ -266,14 +276,26 @@ func (s *Service) Delete(ctx context.Context, userID, sessionID uuid.UUID) (Sess
 
 func validCreateRequest(req CreateRequest) bool {
 	name := strings.TrimSpace(req.Name)
+	memoryRequest, memoryValid := parseMemoryRequest(req.MemoryRequest)
 	return utf8.ValidString(name) &&
 		utf8.RuneCountInString(name) >= 1 &&
 		utf8.RuneCountInString(name) <= 80 &&
 		(req.Priority == "low" || req.Priority == "normal" || req.Priority == "high") &&
+		memoryValid &&
+		memoryRequest.Cmp(minMemoryRequest) >= 0 &&
+		memoryRequest.Cmp(maxMemoryRequest) <= 0 &&
 		req.Runtime == "claude-code" &&
 		req.Provider.Mode == "platform" &&
 		req.Provider.CredentialID == "" &&
 		req.StoragePolicy == "local"
+}
+
+func parseMemoryRequest(raw string) (resource.Quantity, bool) {
+	if raw == "" {
+		return defaultMemoryRequest.DeepCopy(), true
+	}
+	memoryRequest, err := resource.ParseQuantity(raw)
+	return memoryRequest, err == nil
 }
 
 func newEvent(sessionID uuid.UUID, eventType string, payload any, at time.Time) (Event, error) {
