@@ -770,9 +770,13 @@ func priorityRank(className string) int {
 func nodeFreeCPU(node *corev1.Node, pods []corev1.Pod) int64 {
 	used := int64(0)
 	for i := range pods {
-		if pods[i].Spec.NodeName == node.Name {
-			used += podCPULimits(&pods[i])
+		pod := &pods[i]
+		if pod.Spec.NodeName != node.Name ||
+			pod.Status.Phase == corev1.PodSucceeded ||
+			pod.Status.Phase == corev1.PodFailed {
+			continue
 		}
+		used += podCPULimits(pod)
 	}
 	return max(node.Status.Allocatable.Cpu().MilliValue()-used, 0)
 }

@@ -37,6 +37,44 @@ func TestLiveMetricSamplerCalculatesCPUFromAdjacentCounters(t *testing.T) {
 	}
 }
 
+func TestLiveMetricSamplerPrefersNanoCoresWhenWholeSecondTimestampsDistortCounterRate(
+	t *testing.T,
+) {
+	var sampler liveMetricSampler
+	start := time.Date(2026, 7, 27, 3, 35, 16, 0, time.UTC)
+	first, ready := sampler.podMetric("demo/agent-1", PodCounterMetric{
+		ObservedAt: start,
+		Containers: map[string]ContainerCounter{
+			"agent": {
+				CPUUsageSeconds:            1311.103749,
+				CPUUsageNanoCores:          3_011_743_437,
+				CPUUsageNanoCoresAvailable: true,
+				ObservedAt:                 start,
+			},
+		},
+	})
+	if !ready || first.Containers["agent"].CPUMillicores != 3012 {
+		t.Fatalf("first nanoCores sample = %#v, ready %t", first, ready)
+	}
+
+	second, ready := sampler.podMetric("demo/agent-1", PodCounterMetric{
+		ObservedAt: start.Add(time.Second),
+		Containers: map[string]ContainerCounter{
+			"agent": {
+				// The whole-second timestamp would turn this counter delta into
+				// 4736m even though Kubelet reports an actual rate near 3 cores.
+				CPUUsageSeconds:            1315.840217,
+				CPUUsageNanoCores:          2_990_599_311,
+				CPUUsageNanoCoresAvailable: true,
+				ObservedAt:                 start.Add(time.Second),
+			},
+		},
+	})
+	if !ready || second.Containers["agent"].CPUMillicores != 2991 {
+		t.Fatalf("second nanoCores sample = %#v, ready %t", second, ready)
+	}
+}
+
 func TestLiveMetricSamplerReusesLastRateWhenKubeletSampleHasNotAdvanced(t *testing.T) {
 	var sampler liveMetricSampler
 	start := time.Date(2026, 7, 26, 6, 0, 0, 0, time.UTC)

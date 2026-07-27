@@ -96,6 +96,12 @@ if ! grep -A2 'resources: \["agentsessions"\]' <<<"${rendered}" |
   exit 1
 fi
 
+if ! grep -A2 'resources: \["nodes"\]' <<<"${rendered}" |
+  grep -q 'verbs: \["get", "list", "watch"\]'; then
+  echo "operator is missing Node read permissions" >&2
+  exit 1
+fi
+
 generated="$(mktemp -d)"
 trap 'rm -rf "${generated}"' EXIT
 mkdir -p "${generated}/operator"

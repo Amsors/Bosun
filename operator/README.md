@@ -8,9 +8,10 @@ operator 使用 kubebuilder 和 controller-runtime 管理两个 CRD：
 Agent Pod 必须调度到 `role=worker` 节点。平台 namespace、Agent 镜像、gateway、egress proxy 和 storage class 由启动参数注入；生产参数由根目录 Helm chart 管理。
 
 CPU 自动扩缩容直接通过 Kubernetes API Server 的 Node proxy 读取 Kubelet Summary。
-每轮扫描只读取每个 Node 一次，并用 Agent 容器相邻累计 CPU 计数器的真实时间差换算
-millicores；首次采样只建立基线，重复的 Kubelet timestamp 不会形成新决策样本。
-metrics-server 仍供 backend 的 Node 总量监控使用，但不再参与 Operator 的扩缩容决策。
+每轮扫描只读取每个 Node 一次，并优先将 Agent 容器的 `usageNanoCores` 换算为
+millicores；字段缺失时才使用相邻累计计数器回退。重复的 Kubelet timestamp 不会形成
+新决策样本。metrics-server 仍供 backend 的 Node 总量监控使用，但不再参与 Operator
+的扩缩容决策。
 
 Agent CPU 初始和最低额度为 `500m`，最高为 `3000m`，request 与 limit 始终相等。
 普通、高优先级会话按 2 倍扩容、按二分之一缩容；同节点同优先级通过带需求上限的

@@ -77,7 +77,32 @@ describe('ResourceUsagePanel', () => {
     globalThis.localStorage.clear()
   })
 
-  it('updates the displayed agent and Pod limits on the next polling cycle', async () => {
+  it('displays agent requests and limits without the auth-proxy resources', async () => {
+    getSessionResources.mockResolvedValue(snapshot(450, 960))
+
+    const wrapper = mount(ResourceUsagePanel, {
+      props: {
+        sessionId: '018f9c6e-1234-7000-8000-abcdef012501',
+        getAccessToken: () => 'access-token',
+        refreshAccessToken: async () => 'access-token',
+      },
+    })
+    await flushPromises()
+
+    const [cpuChart, memoryChart] = wrapper.findAll('.resource-chart')
+    expect(cpuChart.text()).toContain('Request240m')
+    expect(cpuChart.text()).toContain('Limit450m')
+    expect(cpuChart.text()).not.toContain('Request250m')
+    expect(cpuChart.text()).not.toContain('Limit500m')
+    expect(memoryChart.text()).toContain('Request496 MiB')
+    expect(memoryChart.text()).toContain('Limit960 MiB')
+    expect(memoryChart.text()).not.toContain('Request512 MiB')
+    expect(memoryChart.text()).not.toContain('Limit1.00 GiB')
+
+    wrapper.unmount()
+  })
+
+  it('updates the displayed agent limits on the next polling cycle', async () => {
     vi.useFakeTimers()
     getSessionResources
       .mockResolvedValueOnce(snapshot(450, 960))

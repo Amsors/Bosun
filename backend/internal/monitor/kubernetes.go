@@ -34,9 +34,11 @@ type PodMetric struct {
 }
 
 type ContainerCounter struct {
-	CPUUsageSeconds       float64
-	MemoryWorkingSetBytes int64
-	ObservedAt            time.Time
+	CPUUsageSeconds            float64
+	CPUUsageNanoCores          uint64
+	CPUUsageNanoCoresAvailable bool
+	MemoryWorkingSetBytes      int64
+	ObservedAt                 time.Time
 }
 
 type PodCounterMetric struct {
@@ -250,6 +252,7 @@ type kubeletSummary struct {
 			Name string `json:"name"`
 			CPU  *struct {
 				Time                 string  `json:"time"`
+				UsageNanoCores       *uint64 `json:"usageNanoCores"`
 				UsageCoreNanoSeconds *uint64 `json:"usageCoreNanoSeconds"`
 			} `json:"cpu"`
 			Memory *struct {
@@ -275,17 +278,22 @@ func podCountersFromSummary(raw []byte) (map[string]PodCounterMetric, error) {
 		}
 		for _, container := range pod.Containers {
 			if container.Name == "" || container.CPU == nil ||
-				container.CPU.UsageCoreNanoSeconds == nil {
+				(container.CPU.UsageNanoCores == nil &&
+					container.CPU.UsageCoreNanoSeconds == nil) {
 				continue
 			}
 			observedAt, err := time.Parse(time.RFC3339Nano, container.CPU.Time)
 			if err != nil || observedAt.IsZero() {
 				continue
 			}
-			counter := ContainerCounter{
-				CPUUsageSeconds: float64(*container.CPU.UsageCoreNanoSeconds) /
-					float64(time.Second),
-				ObservedAt: observedAt.UTC(),
+			counter := ContainerCounter{ObservedAt: observedAt.UTC()}
+			if container.CPU.UsageCoreNanoSeconds != nil {
+				counter.CPUUsageSeconds = float64(*container.CPU.UsageCoreNanoSeconds) /
+					float64(time.Second)
+			}
+			if container.CPU.UsageNanoCores != nil {
+				counter.CPUUsageNanoCores = *container.CPU.UsageNanoCores
+				counter.CPUUsageNanoCoresAvailable = true
 			}
 			if container.Memory != nil && container.Memory.WorkingSetBytes != nil {
 				counter.MemoryWorkingSetBytes = int64(*container.Memory.WorkingSetBytes)

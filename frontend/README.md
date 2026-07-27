@@ -38,6 +38,5 @@ Kubernetes resize condition、CPU load class、CPU recommendation 和最近应�
 资源由 Operator 按优先级和节点容量自动调度，该页面按课程展示需求无需登录。
 
 1 秒刷新配合本地 Kubelet 1 秒 cAdvisor housekeeping，可通过 Kubelet Summary API
-显示相邻累计 CPU 计数器计算出的真实秒级负载；页面分别展示 API 查询时间与指标采样时间，
-并只在真实采样时间变化时追加图表点。实时源预热或不可用时自动显示 metrics-server
-回退数据。
+显示 `usageNanoCores` 提供的秒级负载；页面分别展示 API 查询时间与指标采样时间，并只在
+真实采样时间变化时追加图表点。实时源不可用时自动显示 metrics-server 回退数据。
