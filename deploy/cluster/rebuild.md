@@ -267,7 +267,7 @@ kubectl exec -n bosun-platform deployment/bosun-frontend -- \
 
 ## 5. 准备 DNS、Docker Hub 和 GitHub
 
-1. 将 `bosun.amsors.com` 的 A 记录指向 `node-hk-edge` 的公网 IPv4。不要把 DNS 指向 Tailscale IP。
+1. 将 `bosun.amsors.com` 的 A 记录指向 `node-hk-edge` 的公网 IPv4。
 2. 在 Docker Hub 准备 `backend-api`、`gateway`、`operator`、`frontend`、`agent`、`egress-proxy` 六个公开 repository。公开 repository 让 k3s 节点不需要 registry credential。
 3. 创建 Repository Variable `DOCKERHUB_NAMESPACE`，值为 Docker Hub 用户名或 organization。
 4. 在 `registry` Environment 创建 `DOCKERHUB_USERNAME` 和只有 push 权限的 `DOCKERHUB_TOKEN` Secret。
@@ -337,11 +337,9 @@ workflow 会完成以下初始化：
 - 安装 CRD、RBAC、PostgreSQL 与全部 Bosun workload；
 - 申请 Let's Encrypt 证书并验证 HTTP 到 HTTPS 跳转。
 
-Bosun 自建的六个镜像只从 Docker Hub 推拉，不配置 registry mirror。k3s 内置系统组件和 cert-manager 仍使用它们的官方上游 registry；其中 cert-manager 的官方 chart 和镜像位于 Quay。为了让第三方组件也只经过 Docker Hub 而自行维护镜像副本会增加不必要的供应链成本，本项目不采用该方案。
+Bosun 自建的六个镜像只从 Docker Hub 推拉。k3s 内置系统组件和 cert-manager 仍用它们的官方上游 registry；其中 cert-manager 的官方 chart 和镜像位于 Quay。
 
-## 8. 最终验收
-
-在 control plane 执行：
+## 8. 验收
 
 ```bash
 sudo k3s kubectl get nodes --show-labels
@@ -353,23 +351,3 @@ sudo k3s kubectl get nodes \
 curl -I http://bosun.amsors.com/healthz
 curl -fsS https://bosun.amsors.com/healthz
 ```
-
-验收标准：
-
-- 节点全部 `Ready`；
-- ServiceLB label 只出现在 `node-hk-edge`；
-- Traefik 和 frontend 在 edge；
-- PostgreSQL、API、gateway、operator 和 cert-manager 在 core；
-- 新建 `AgentSession` 的 Pod 只在 `node-hk-worker`；
-- Certificate 为 `Ready=True`；
-- HTTP 返回指向对应 HTTPS URL 的永久重定向（`301` 或 `308`），HTTPS `/healthz` 返回成功。
-
-如果节点加入失败，先检查 `tailscale ping <peer>`、control plane 的 `6443/tcp` 可达性以及 `journalctl -u k3s-agent`。如果 Pod 跨节点不通，检查 k3s Node `INTERNAL-IP` 是否为 Tailscale IP、`tailscale0` 是否存在，以及主机防火墙是否允许 Tailscale 内部流量。如果 cert-manager 报外部 HTTPS 证书过期，但节点上直接 `curl` 正常，检查 Pod `/etc/resolv.conf` 是否再次出现 `localdomain`，以及 `getent` 是否返回了 `<external-host>.localdomain`。
-
-## 参考
-
-- [K3s Quick-Start Guide](https://docs.k3s.io/quick-start)
-- [K3s Requirements](https://docs.k3s.io/installation/requirements)
-- [K3s Uninstalling](https://docs.k3s.io/installation/uninstall)
-- [K3s Distributed hybrid or multicloud cluster](https://docs.k3s.io/networking/distributed-multicloud)
-- [cert-manager Helm installation](https://cert-manager.io/docs/installation/helm/)
