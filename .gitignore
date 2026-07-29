@@ -4,3 +4,5 @@ deploy/local/*.secret
 deploy/local/*.secret.*
 tmp_kubeconfig
 /ignored_file
+CLAUDE.md
+AGENTS.md
